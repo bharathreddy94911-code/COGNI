@@ -1,0 +1,31 @@
+# Node dependencies
+node_modules/
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+.venv/
+
+# Build outputs
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+
+# Database & Uploads
+data/*.db
+uploads/
+scratch/test_edu_files/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
