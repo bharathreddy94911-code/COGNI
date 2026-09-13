@@ -1,16 +1,21 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
     LogOut, Moon, Sun, AlertCircle, FileText, CheckCircle, 
-    XCircle, Clock, ShieldAlert, ChevronRight, Download, Eye
+    XCircle, Clock, ShieldAlert, ChevronRight, Download, Eye, BarChart3, User
 } from "lucide-react";
 import MASCOT_IMG from "./mascot-clean.png";
 import { Mascot } from "./mascot-login-flow";
+import AnalyticsDashboard from "./AnalyticsDashboard.jsx";
 
 const FONT = `"Sen", ui-rounded, "SF Pro Rounded", system-ui, sans-serif`;
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOut, onStartProcessing }) {
+    const [activeTab, setActiveTab] = useState("queue");
+    const [showProfileModal, setShowProfileModal] = useState(false);
+    const profileButtonRef = useRef(null);
     const [applications, setApplications] = useState([]);
     
     // Cursor glow effect for dot background
@@ -30,6 +35,7 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
     }, []);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [missingEndpoint, setMissingEndpoint] = useState(false);
     const [filter, setFilter] = useState("All");
     const [selectedAppId, setSelectedAppId] = useState(null);
 
@@ -43,11 +49,19 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
     const fetchApplications = async () => {
         setLoading(true);
         setError(null);
+        setMissingEndpoint(false);
         try {
             const token = localStorage.getItem('auth_token');
             const headers = token ? { "Authorization": `Bearer ${token}` } : {};
 
-            const response = await fetch(`${API_BASE_URL}/api/applications`, { headers });
+            let response = await fetch(`${API_BASE_URL}/api/admin/applications`, { headers });
+            if (!response.ok && response.status === 404) {
+                response = await fetch(`${API_BASE_URL}/api/applications`, { headers });
+            }
+            if (response.status === 404) {
+                setMissingEndpoint(true);
+                return;
+            }
             if (!response.ok) {
                 throw new Error("Failed to fetch applications.");
             }
@@ -125,21 +139,25 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
         onSignOut();
     };
 
-    // Derived Summary stats (if we had data)
+    // Derived Summary stats
     const stats = {
         total: applications.length,
-        pending: applications.filter(a => a.status === 'PENDING_REVIEW').length,
-        highRisk: applications.filter(a => a.riskLevel === 'HIGH').length,
-        approved: applications.filter(a => a.decision === 'APPROVED').length,
-        rejected: applications.filter(a => a.decision === 'REJECTED').length,
+        pending: applications.filter(a => (a.status || '').toUpperCase().includes('PENDING')).length,
+        highRisk: applications.filter(a => (a.risk_level || a.riskLevel || '').toUpperCase() === 'HIGH').length,
+        approved: applications.filter(a => (a.decision || a.status || '').toUpperCase().includes('PASS') || (a.decision || a.status || '').toUpperCase().includes('APPROV')).length,
+        rejected: applications.filter(a => (a.decision || a.status || '').toUpperCase().includes('REJECT') || (a.decision || a.status || '').toUpperCase().includes('FAIL')).length,
     };
 
     const filteredApps = applications.filter(app => {
+        const rLevel = (app.risk_level || app.riskLevel || 'LOW').toUpperCase();
+        const dec = (app.decision || app.status || '').toUpperCase();
+        const stat = (app.status || '').toUpperCase();
+
         if (filter === "All") return true;
-        if (filter === "Pending Review") return app.status === "PENDING_REVIEW";
-        if (filter === "High Risk") return app.riskLevel === "HIGH";
-        if (filter === "Approved") return app.decision === "APPROVED";
-        if (filter === "Rejected") return app.decision === "REJECTED";
+        if (filter === "Pending Review") return stat.includes("PENDING");
+        if (filter === "High Risk") return rLevel === "HIGH";
+        if (filter === "Approved") return dec.includes("PASS") || dec.includes("APPROV");
+        if (filter === "Rejected") return dec.includes("REJECT") || dec.includes("FAIL");
         return true;
     });
 
@@ -315,21 +333,242 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
             </div>
 
             {/* Header */}
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 32px", borderBottom: `1px solid ${colors.panelBorder}`, background: colors.panelBg, backdropFilter: "blur(12px)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <header style={{ position: "relative", zIndex: 999999, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 32px", borderBottom: `1px solid ${colors.panelBorder}`, background: colors.panelBg, backdropFilter: "blur(12px)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                     <div style={{ background: colors.pillBg, color: "white", padding: "6px 10px", borderRadius: 8, fontSize: 13, fontWeight: 700, letterSpacing: 1 }}>ADMIN</div>
                     <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Loan Document Processing Agent</h1>
+                    
+                    <div style={{ display: "flex", gap: 6, marginLeft: 16, background: theme === 'dark' ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.04)", padding: "4px", borderRadius: 10 }}>
+                        <button 
+                            onClick={() => setActiveTab("queue")}
+                            style={{
+                                background: activeTab === "queue" ? colors.pillBg : "transparent",
+                                color: activeTab === "queue" ? "white" : colors.faint,
+                                border: "none", padding: "6px 12px", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                                cursor: "pointer", fontFamily: FONT, transition: "all 0.2s ease"
+                            }}
+                        >
+                            Queue View
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab("analytics")}
+                            style={{
+                                background: activeTab === "analytics" ? colors.pillBg : "transparent",
+                                color: activeTab === "analytics" ? "white" : colors.faint,
+                                border: "none", padding: "6px 12px", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                                cursor: "pointer", fontFamily: FONT, transition: "all 0.2s ease",
+                                display: "flex", alignItems: "center", gap: 6
+                            }}
+                        >
+                            <BarChart3 size={14} /> Analytics Dashboard
+                        </button>
+                    </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                    <button onClick={toggleTheme} style={{ background: "transparent", border: "none", color: colors.faint, cursor: "pointer", display: "flex" }}>
+                    <button onClick={toggleTheme} style={{ background: "transparent", border: "none", color: colors.faint, cursor: "pointer", display: "flex" }} title="Toggle Theme">
                         {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                     </button>
-                    <button onClick={handleSignOut} style={{ background: "transparent", border: "none", color: colors.faint, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: FONT, fontWeight: 600 }}>
+                    
+                    {/* Admin Profile Logo / Avatar Button */}
+                    {(() => {
+                        const currentUser = JSON.parse(localStorage.getItem('demo_session') || '{}');
+                        const authData = JSON.parse(localStorage.getItem('mascot_authData') || '{}');
+                        const userName = currentUser.full_name || currentUser.displayName || currentUser.name || authData?.user?.displayName || authData?.user?.name || "Bank Employee";
+                        const userEmail = currentUser.email || authData?.user?.email || "employee@bank.com";
+                        const userRole = currentUser.role || authData?.user?.role || "BANK_EMPLOYEE";
+                        const branchId = currentUser.branch_id || "BR-MUMBAI-01";
+                        const initial = userName.charAt(0).toUpperCase();
+
+                        return (
+                            <div style={{ position: "relative" }}>
+                                <button 
+                                    ref={profileButtonRef}
+                                    onClick={() => setShowProfileModal(prev => !prev)}
+                                    title="View Profile"
+                                    style={{
+                                        display: "flex", alignItems: "center", gap: 10,
+                                        background: showProfileModal 
+                                            ? (theme === 'dark' ? "rgba(26,115,232,0.25)" : "rgba(26,115,232,0.12)")
+                                            : (theme === 'dark' ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)"),
+                                        border: showProfileModal 
+                                            ? "2px solid #1A73E8" 
+                                            : `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
+                                        padding: "4px 14px 4px 4px", borderRadius: 24,
+                                        cursor: "pointer", fontFamily: FONT, color: colors.bubbleText,
+                                        boxShadow: showProfileModal ? "0 0 14px rgba(26,115,232,0.4)" : "none",
+                                        transition: "all 0.2s ease"
+                                    }}
+                                >
+                                    <div style={{
+                                        width: 34, height: 34, borderRadius: "50%",
+                                        background: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)",
+                                        color: "#FFFFFF",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        fontWeight: 800, fontSize: 15,
+                                        boxShadow: "0 2px 6px rgba(26,115,232,0.4)"
+                                    }}>
+                                        {initial}
+                                    </div>
+                                    <div style={{ textAlign: "left" }}>
+                                        <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2, color: colors.bubbleText }}>{userName.split(' ')[0]}</div>
+                                        <div style={{ fontSize: 10, color: colors.faint, fontWeight: 600 }}>Bank Employee</div>
+                                    </div>
+                                </button>
+
+                                {/* Clean Profile Dropdown Popup on top of UI */}
+                                <AnimatePresence>
+                                    {showProfileModal && (
+                                        <>
+                                            {/* Transparent Click-Outside Overlay */}
+                                            <div 
+                                                onClick={() => setShowProfileModal(false)}
+                                                style={{
+                                                    position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+                                                    zIndex: 999999, background: "transparent"
+                                                }}
+                                            />
+                                            {/* Floating Dropdown Card anchored right below Profile Button */}
+                                            <motion.div
+                                                initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                                                transition={{ duration: 0.15, ease: "easeOut" }}
+                                                style={{
+                                                    position: "absolute", right: 0, top: "calc(100% + 8px)", zIndex: 1000000,
+                                                    width: "330px", 
+                                                    background: theme === 'dark' ? '#181E2A' : '#FFFFFF',
+                                                    color: theme === 'dark' ? '#F8FAFC' : '#0F172A',
+                                                    border: theme === 'dark' ? '1px solid rgba(255,255,255,0.22)' : '1px solid rgba(0,0,0,0.15)',
+                                                    borderRadius: "18px", padding: "20px",
+                                                    boxShadow: theme === 'dark' 
+                                                        ? "0 20px 60px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.2)" 
+                                                        : "0 20px 60px rgba(0, 0, 0, 0.22), 0 0 1px rgba(0, 0, 0, 0.1)",
+                                                    fontFamily: FONT
+                                                }}
+                                            >
+                                                {/* Top Header Row with Close Button */}
+                                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                                                        <div style={{
+                                                            width: 48, height: 48, borderRadius: "50%",
+                                                            background: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)",
+                                                            color: "#FFFFFF",
+                                                            display: "flex", alignItems: "center", justifyContent: "center",
+                                                            fontWeight: 800, fontSize: 20,
+                                                            boxShadow: "0 4px 12px rgba(26,115,232,0.4)",
+                                                            flexShrink: 0
+                                                        }}>
+                                                            {initial}
+                                                        </div>
+                                                        <div style={{ overflow: "hidden" }}>
+                                                            <div style={{ 
+                                                                fontWeight: 800, fontSize: 16, 
+                                                                color: theme === 'dark' ? '#FFFFFF' : '#0F172A', 
+                                                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" 
+                                                            }}>
+                                                                {userName}
+                                                            </div>
+                                                            <div style={{ 
+                                                                fontSize: 12, fontWeight: 500,
+                                                                color: theme === 'dark' ? '#94A3B8' : '#475569', 
+                                                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                                                marginTop: 2
+                                                            }}>
+                                                                {userEmail}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setShowProfileModal(false)}
+                                                        style={{
+                                                            background: theme === 'dark' ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)",
+                                                            border: "none", borderRadius: "50%",
+                                                            width: 26, height: 26,
+                                                            display: "flex", alignItems: "center", justifyContent: "center",
+                                                            color: theme === 'dark' ? '#94A3B8' : '#64748B',
+                                                            cursor: "pointer", transition: "all 0.2s ease"
+                                                        }}
+                                                        onMouseEnter={(e) => e.currentTarget.style.color = theme === 'dark' ? '#FFFFFF' : '#000000'}
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
+
+                                                {/* Account Info Details Box */}
+                                                <div style={{ 
+                                                    background: theme === 'dark' ? 'rgba(255,255,255,0.05)' : '#F8FAFC',
+                                                    border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : '#E2E8F0'}`,
+                                                    borderRadius: "14px",
+                                                    padding: "14px", margin: "14px 0", 
+                                                    display: "flex", flexDirection: "column", gap: 10, fontSize: 13 
+                                                }}>
+                                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                        <span style={{ color: theme === 'dark' ? '#94A3B8' : '#64748B', fontWeight: 600 }}>System Role</span>
+                                                        <span style={{ 
+                                                            fontWeight: 800, color: "#1A73E8", 
+                                                            background: theme === 'dark' ? 'rgba(26,115,232,0.2)' : 'rgba(26,115,232,0.1)',
+                                                            padding: "2px 8px", borderRadius: "6px", fontSize: 11
+                                                        }}>
+                                                            {userRole}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                        <span style={{ color: theme === 'dark' ? '#94A3B8' : '#64748B', fontWeight: 600 }}>Branch ID</span>
+                                                        <span style={{ fontWeight: 700, color: theme === 'dark' ? '#F1F5F9' : '#1E293B' }}>{branchId}</span>
+                                                    </div>
+                                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                        <span style={{ color: theme === 'dark' ? '#94A3B8' : '#64748B', fontWeight: 600 }}>Access Level</span>
+                                                        <span style={{ fontWeight: 700, color: theme === 'dark' ? '#F1F5F9' : '#1E293B' }}>Full Admin</span>
+                                                    </div>
+                                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                        <span style={{ color: theme === 'dark' ? '#94A3B8' : '#64748B', fontWeight: 600 }}>Account Status</span>
+                                                        <span style={{ 
+                                                            fontWeight: 800, color: "#16A34A",
+                                                            background: theme === 'dark' ? 'rgba(22,163,74,0.2)' : 'rgba(22,163,74,0.1)',
+                                                            padding: "2px 8px", borderRadius: "6px", fontSize: 11,
+                                                            display: "flex", alignItems: "center", gap: 6
+                                                        }}>
+                                                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#16A34A" }} />
+                                                            Active
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <button 
+                                                    onClick={() => {
+                                                        setShowProfileModal(false);
+                                                        handleSignOut();
+                                                    }}
+                                                    style={{
+                                                        width: "100%", padding: "10px", borderRadius: "10px",
+                                                        background: "rgba(220,38,38,0.1)", 
+                                                        border: "1px solid rgba(220,38,38,0.25)",
+                                                        color: "#DC2626", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                                                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                                                        fontFamily: FONT, transition: "all 0.2s ease"
+                                                    }}
+                                                    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(220,38,38,0.18)"}
+                                                    onMouseLeave={(e) => e.currentTarget.style.background = "rgba(220,38,38,0.1)"}
+                                                >
+                                                    <LogOut size={16} /> Sign Out
+                                                </button>
+                                            </motion.div>
+                                        </>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        );
+                    })()}
+
+                    <button onClick={handleSignOut} style={{ background: "transparent", border: "none", color: colors.faint, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: FONT, fontWeight: 600 }} title="Sign Out">
                         <LogOut size={18} /> Sign Out
                     </button>
                 </div>
             </header>
 
+            {activeTab === "analytics" ? (
+                <AnalyticsDashboard colors={colors} theme={theme} onBack={() => setActiveTab("queue")} />
+            ) : (
             <div style={{ flex: 1, padding: "32px", maxWidth: 1400, margin: "0 auto", width: "100%", display: "flex", flexDirection: "column", gap: "24px" }}>
                 
                 {/* Welcome & Action Section 50/50 Split */}
@@ -337,9 +576,9 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
                     {/* Left: Application Review Center */}
                     <div style={{ display: "flex", alignItems: "center", gap: 24, background: colors.panelBg, border: `1px solid ${colors.panelBorder}`, borderRadius: 20, padding: "32px", position: "relative", overflow: "hidden" }}>
                         <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <motion.div layoutId="employee-shared-mascot" transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}>
+                            <div>
                                 <Mascot size={42} mood="neutral" />
-                            </motion.div>
+                            </div>
                         </div>
                         <div style={{ zIndex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                             <h2 style={{ margin: "0 0 8px 0", fontSize: 24, fontWeight: 800 }}>Application Review Center</h2>
@@ -409,9 +648,7 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
                     {[
                         { label: "TOTAL APPLICATIONS", value: stats.total, icon: FileText, color: colors.accent },
                         { label: "PENDING REVIEW", value: stats.pending, icon: Clock, color: "#D97706" },
-                        { label: "HIGH RISK", value: stats.highRisk, icon: ShieldAlert, color: "#EA4335" },
-                        { label: "APPROVED", value: stats.approved, icon: CheckCircle, color: "#10B981" },
-                        { label: "REJECTED", value: stats.rejected, icon: XCircle, color: "#EF4444" }
+                        { label: "HIGH RISK", value: stats.highRisk, icon: ShieldAlert, color: "#EA4335" }
                     ].map((stat, i) => (
                         <div key={i} style={{ background: colors.panelBg, border: `1px solid ${colors.panelBorder}`, borderRadius: 16, padding: "20px", display: "flex", flexDirection: "column", gap: 12 }}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -468,9 +705,21 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
                                         <tr key={app.application_id} style={{ borderTop: `1px solid ${colors.panelBorder}` }}>
                                             <td style={{ padding: "16px 20px", fontWeight: 600 }}>{app.application_id}</td>
                                             <td style={{ padding: "16px 20px", color: colors.faint }}>{app.loan_type}</td>
-                                            <td style={{ padding: "16px 20px" }}>{app.document_status}</td>
-                                            <td style={{ padding: "16px 20px" }}>{app.decision}</td>
-                                            <td style={{ padding: "16px 20px" }}>{app.riskLevel}</td>
+                                            <td style={{ padding: "16px 20px" }}>
+                                                <span style={{ padding: "4px 8px", borderRadius: "6px", fontSize: "12px", fontWeight: 600, background: `${colors.panelBorder}60`, color: colors.bubbleText }}>
+                                                    {app.document_status || app.status || "Completed"}
+                                                </span>
+                                            </td>
+                                            <td style={{ padding: "16px 20px" }}>
+                                                <span style={{ padding: "4px 8px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, background: (app.decision || app.status || '').toUpperCase().includes('PASS') ? "rgba(52,168,83,0.1)" : "rgba(234,67,53,0.1)", color: (app.decision || app.status || '').toUpperCase().includes('PASS') ? "#34A853" : "#EA4335" }}>
+                                                    {app.decision || app.status || "PASS"}
+                                                </span>
+                                            </td>
+                                            <td style={{ padding: "16px 20px" }}>
+                                                <span style={{ padding: "4px 8px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, color: (app.risk_level || app.riskLevel || 'LOW').toUpperCase() === 'HIGH' ? '#EA4335' : ((app.risk_level || app.riskLevel || 'LOW').toUpperCase() === 'MEDIUM' ? '#FACC15' : '#34A853') }}>
+                                                    {(app.risk_level || app.riskLevel || "LOW").toUpperCase()}
+                                                </span>
+                                            </td>
                                             <td style={{ padding: "16px 20px" }}>
                                                 <button 
                                                     onClick={() => setSelectedAppId(app.application_id)}
@@ -486,8 +735,8 @@ export default function EmployeeDashboard({ colors, theme, toggleTheme, onSignOu
                         </table>
                     </div>
                 </div>
-
             </div>
+            )}
         </div>
     );
 }

@@ -39,15 +39,20 @@ class DocumentClassificationResult(BaseModel):
     Serves as the explicit contract between Agent 1 and Agent 2 (Extraction Agent).
     """
     document_id: str = Field(..., description="Unique identifier for the document")
+    request_id: Optional[str] = Field(default=None, description="UUID4 request ID for pipeline tracing")
+    file_hash: Optional[str] = Field(default=None, description="SHA-256 hash of document binary content")
     filename: str = Field(..., description="Sanitized original filename")
     file_extension: str = Field(..., description="File extension including leading dot")
     file_path: Optional[str] = Field(default=None, description="Absolute file path on disk")
     document_type: str = Field(
         ...,
-        description="One of: payslip, bank_statement, itr_tax_return, kyc_identity, employment_letter, form_16, address_proof, other, unknown"
+        description="One of: pan_card, aadhaar_card, payslip, bank_statement, itr_gst_return, address_proof, other, unknown, needs_review"
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Classification confidence score between 0.0 and 1.0")
     classification_reason: str = Field(..., description="Explanation of why this document category was assigned")
+    matched_indicators: List[str] = Field(default_factory=list, description="Text keywords or patterns matched")
+    warnings: List[str] = Field(default_factory=list, description="Warnings generated during extraction or classification")
+    requires_manual_review: bool = Field(default=False, description="Flag indicating if manual underwriter review is required")
     text_available: bool = Field(..., description="Whether usable text was extracted from the document")
     text_length: int = Field(..., ge=0, description="Length of extracted textual content in characters")
     page_count: int = Field(default=1, ge=0, description="Number of pages or 1 for single-page/image documents")
@@ -57,7 +62,7 @@ class DocumentClassificationResult(BaseModel):
     ocr_success: bool = Field(default=True, description="Whether OCR executed successfully")
     normalized_document_type: Optional[str] = Field(default=None, description="Canonical normalized document type")
     processing_time_ms: float = Field(..., ge=0.0, description="Total processing time in milliseconds")
-    status: str = Field(..., description="Processing status: success, warning, unknown, failed")
+    status: str = Field(..., description="Processing status: success, warning, unknown, needs_review, failed")
     error_type: Optional[str] = Field(default=None, description="Error category if processing or classification failed")
     next_agent: str = Field(default="extraction_agent", description="Contract field specifying the downstream agent")
 

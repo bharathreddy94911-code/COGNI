@@ -408,7 +408,7 @@ LOAN_DOCUMENT_POLICY: Dict[str, Dict[str, List[DocumentRequirement]]] = {
             DocumentRequirement(
                 requirement_id="gold_loan_valuation",
                 display_name="Gold Valuation Report",
-                accepted_document_types=["jewellery_valuation_report", "gold_valuation_document"],
+                accepted_document_types=["gold_valuation_report", "jewellery_valuation_report", "gold_valuation_document"],
                 required=True
             )
         ],
@@ -541,7 +541,7 @@ LOAN_DOCUMENT_POLICY: Dict[str, Dict[str, List[DocumentRequirement]]] = {
             DocumentRequirement(
                 requirement_id="fd_certificate",
                 display_name="Fixed Deposit Certificate / Receipt",
-                accepted_document_types=["fixed_deposit_certificate", "fixed_deposit_receipt"],
+                accepted_document_types=["fixed_deposit_certificate_receipt", "fixed_deposit_certificate", "fixed_deposit_receipt"],
                 required=True
             ),
             DocumentRequirement(
@@ -553,7 +553,7 @@ LOAN_DOCUMENT_POLICY: Dict[str, Dict[str, List[DocumentRequirement]]] = {
             DocumentRequirement(
                 requirement_id="fd_statement",
                 display_name="FD Statement",
-                accepted_document_types=["fd_statement", "fixed_deposit_certificate"],
+                accepted_document_types=["fd_statement", "fixed_deposit_statement", "fixed_deposit_account_statement"],
                 required=True
             )
         ],
@@ -632,17 +632,17 @@ LOAN_DOCUMENT_POLICY: Dict[str, Dict[str, List[DocumentRequirement]]] = {
 
 CANONICAL_DOCUMENT_TYPES = {
     # KYC / Identity
-    "kyc_identity", "student_kyc", "co_applicant_kyc", "aadhaar_identity",
+    "kyc_identity", "student_kyc", "co_applicant_kyc", "aadhaar_identity", "aadhaar_card",
     "pan_card", "passport_identity", "voter_identity", "voter_id", "driving_license",
 
     # Income / Employment
     "payslip", "salary_certificate", "employment_income_proof", "income_proof",
-    "agricultural_income_proof", "itr_tax_return", "form_16",
+    "agricultural_income_proof", "itr_tax_return", "itr_gst_return", "form_16",
     "employment_letter", "employment_certificate", "office_id", "employee_id",
     "company_id", "employment_proof", "income_certificate", "co_applicant_income_proof",
 
     # Banking
-    "bank_statement", "business_bank_statement",
+    "bank_statement", "business_bank_statement", "bank_account_document",
 
     # Property
     "property_title_document", "sale_deed", "sale_agreement",
@@ -663,12 +663,12 @@ CANONICAL_DOCUMENT_TYPES = {
     "business_license",
 
     # Gold / FD / Consumer
-    "gold_security_document", "jewellery_valuation_report", "pledge_document",
-    "fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document",
+    "gold_valuation_report", "gold_security_document", "jewellery_valuation_report", "pledge_document",
+    "fixed_deposit_certificate_receipt", "fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document",
     "product_quotation", "consumer_durable_quotation", "product_invoice", "purchase_invoice",
 
     # Status Types
-    "other", "unknown"
+    "address_proof", "other", "unknown", "needs_review"
 }
 
 
@@ -678,6 +678,7 @@ CANONICAL_LABELS: Dict[str, str] = {
     "kyc_identity": "KYC / Identity Proof",
     "pan_card": "PAN Card",
     "aadhaar_identity": "Aadhaar Card",
+    "aadhaar_card": "Aadhaar Card",
     "passport_identity": "Passport",
     "voter_id": "Voter ID",
     "voter_identity": "Voter ID",
@@ -686,9 +687,15 @@ CANONICAL_LABELS: Dict[str, str] = {
     "salary_certificate": "Salary Certificate",
     "employment_income_proof": "Employment Income Proof",
     "income_proof": "Income Proof",
+    "applicant_income_proof": "Applicant Income Proof",
+    "co_applicant_income_proof": "Co-applicant Income Proof",
     "itr_tax_return": "Income Tax Return (ITR)",
+    "itr_gst_return": "ITR / GST Return",
+    "gst_certificate": "GST Registration Certificate",
+    "gst_return": "GST Return",
     "form_16": "Form 16 TDS Certificate",
     "bank_statement": "Bank Statement",
+    "bank_account_document": "Bank Account Document",
     "business_bank_statement": "Business Bank Statement",
     "product_quotation": "Product Quotation",
     "consumer_durable_quotation": "Consumer Durable Quotation",
@@ -703,11 +710,124 @@ CANONICAL_LABELS: Dict[str, str] = {
     "approved_building_plan": "Approved Building Plan",
     "land_ownership_document": "Land Ownership Record",
     "agricultural_income_proof": "Agricultural Income Proof",
+    "gold_valuation_report": "Gold Valuation Report",
+    "gold_security_document": "Gold Security Document",
+    "fixed_deposit_certificate_receipt": "Fixed Deposit Certificate / Receipt",
+    "fd_statement": "FD Statement",
+    "needs_review": "Needs Underwriter Review",
     "cd_kyc": "KYC / Identity Proof",
     "cd_pan": "PAN Card",
     "cd_income": "Income Proof",
     "cd_bank": "Bank Statement",
     "cd_quotation": "Product Quotation"
+}
+
+CENTRAL_DOCUMENT_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "pan_card": {
+        "internal_key": "pan_card",
+        "display_name": "PAN Card",
+        "agent": "pan_card_agent",
+        "expected_category": "IDENTITY",
+        "supported_loan_types": ["home_loan", "personal_loan", "vehicle_loan", "education_loan", "business_loan", "gold_loan", "loan_against_property", "agriculture_loan", "loan_against_fd", "consumer_durable_loan"]
+    },
+    "itr_gst_return": {
+        "internal_key": "itr_gst_return",
+        "display_name": "ITR / GST Return",
+        "agent": "itr_gst_return_agent",
+        "expected_category": "TAX_AND_INCOME",
+        "supported_loan_types": ["home_loan", "personal_loan", "business_loan", "loan_against_property"]
+    },
+    "gst_certificate": {
+        "internal_key": "gst_certificate",
+        "display_name": "GST Registration Certificate",
+        "agent": "gst_certificate_agent",
+        "expected_category": "BUSINESS",
+        "supported_loan_types": ["business_loan"]
+    },
+    "bank_statement": {
+        "internal_key": "bank_statement",
+        "display_name": "Bank Statement",
+        "agent": "bank_statement_agent",
+        "expected_category": "BANKING",
+        "supported_loan_types": ["home_loan", "personal_loan", "vehicle_loan", "education_loan", "business_loan", "gold_loan", "loan_against_property", "agriculture_loan", "loan_against_fd", "consumer_durable_loan"]
+    },
+    "payslip": {
+        "internal_key": "payslip",
+        "display_name": "Salary Payslip",
+        "agent": "payslip_agent",
+        "expected_category": "INCOME_AND_EMPLOYMENT",
+        "supported_loan_types": ["home_loan", "personal_loan", "vehicle_loan", "loan_against_property", "consumer_durable_loan"]
+    },
+    "applicant_income_proof": {
+        "internal_key": "applicant_income_proof",
+        "display_name": "Applicant Income Proof",
+        "agent": "applicant_income_proof_agent",
+        "expected_category": "INCOME_AND_EMPLOYMENT",
+        "supported_loan_types": ["home_loan", "personal_loan", "vehicle_loan", "education_loan", "business_loan", "loan_against_property"]
+    },
+    "co_applicant_income_proof": {
+        "internal_key": "co_applicant_income_proof",
+        "display_name": "Co-applicant Income Proof",
+        "agent": "co_applicant_income_proof_agent",
+        "expected_category": "INCOME_AND_EMPLOYMENT",
+        "supported_loan_types": ["education_loan", "home_loan"]
+    },
+    "applicant_kyc": {
+        "internal_key": "applicant_kyc",
+        "display_name": "Applicant KYC / Identity",
+        "agent": "applicant_kyc_agent",
+        "expected_category": "IDENTITY",
+        "supported_loan_types": ["home_loan", "personal_loan", "vehicle_loan", "education_loan", "business_loan", "gold_loan", "loan_against_property", "agriculture_loan", "loan_against_fd", "consumer_durable_loan"]
+    },
+    "co_applicant_kyc": {
+        "internal_key": "co_applicant_kyc",
+        "display_name": "Co-applicant KYC / Identity",
+        "agent": "co_applicant_kyc_agent",
+        "expected_category": "IDENTITY",
+        "supported_loan_types": ["education_loan", "home_loan"]
+    },
+    "balance_sheet": {
+        "internal_key": "balance_sheet",
+        "display_name": "Balance Sheet",
+        "agent": "balance_sheet_agent",
+        "expected_category": "FINANCIAL_STATEMENTS",
+        "supported_loan_types": ["business_loan", "home_loan", "loan_against_property"]
+    },
+    "property_title_document": {
+        "internal_key": "property_title_document",
+        "display_name": "Property Title Document",
+        "agent": "property_title_document_agent",
+        "expected_category": "PROPERTY",
+        "supported_loan_types": ["home_loan", "loan_against_property"]
+    },
+    "gold_valuation_report": {
+        "internal_key": "gold_valuation_report",
+        "display_name": "Gold Valuation Report",
+        "agent": "gold_valuation_report_agent",
+        "expected_category": "GOLD_LOAN",
+        "supported_loan_types": ["gold_loan"]
+    },
+    "gold_security_document": {
+        "internal_key": "gold_security_document",
+        "display_name": "Gold Security Document",
+        "agent": "gold_security_document_agent",
+        "expected_category": "GOLD_LOAN",
+        "supported_loan_types": ["gold_loan"]
+    },
+    "fixed_deposit_certificate_receipt": {
+        "internal_key": "fixed_deposit_certificate_receipt",
+        "display_name": "Fixed Deposit Certificate / Receipt",
+        "agent": "fixed_deposit_certificate_receipt_agent",
+        "expected_category": "FIXED_DEPOSIT",
+        "supported_loan_types": ["loan_against_fd"]
+    },
+    "fd_statement": {
+        "internal_key": "fd_statement",
+        "display_name": "FD Statement",
+        "agent": "fd_statement_agent",
+        "expected_category": "FIXED_DEPOSIT",
+        "supported_loan_types": ["loan_against_fd"]
+    }
 }
 
 
@@ -716,6 +836,8 @@ def get_display_document_type(doc_type: Optional[str]) -> str:
     if not doc_type:
         return "Unknown Document"
     norm = normalize_document_type(doc_type)
+    if norm in CENTRAL_DOCUMENT_REGISTRY:
+        return CENTRAL_DOCUMENT_REGISTRY[norm]["display_name"]
     return CANONICAL_LABELS.get(norm, norm.replace("_", " ").title())
 
 
@@ -752,15 +874,30 @@ def normalize_document_type(raw_type: Optional[str], requirement_id: Optional[st
     if lower in CANONICAL_DOCUMENT_TYPES:
         return lower
 
+    # Specific Co-Applicant Normalization
+    if lower in [
+        "co_applicant_kyc", "coapplicant_kyc", "co_app_kyc", "co_applicant_identity",
+        "co_applicant_kyc_document", "coapplicant_kyc_document", "co_applicant_pan",
+        "co_applicant_aadhaar", "co_applicant_passport", "co_applicant_voter",
+        "co_applicant_dl", "co_applicant_driving_license"
+    ]:
+        return "co_applicant_kyc"
+    if lower in [
+        "co_applicant_income_proof", "coapplicant_income_proof", "co_applicant_income",
+        "coapplicant_income", "co_app_income_proof", "co_app_income",
+        "co applicant income proof", "co-applicant-income-proof", "co_applicant_income_document"
+    ]:
+        return "co_applicant_income_proof"
+
     # Specific KYC Normalization
     if lower in ["student_kyc", "student_identity", "student_id", "student_id_card", "student_pan_or_identity_record"]:
         return "student_kyc"
     if lower in ["co_applicant_kyc", "coapplicant_kyc", "co_app_kyc", "co_applicant_identity"]:
         return "co_applicant_kyc"
-    if lower in ["pan_card", "pan", "permanent_account_number", "pan_document"]:
+    if lower in ["pan_card", "pan", "permanent_account_number", "permanent_account_number_card", "pan_card_document", "pan_document", "pan_card"]:
         return "pan_card"
     if lower in ["aadhaar_identity", "aadhaar_card", "aadhaar", "uidai", "aadhar", "aadhar_card"]:
-        return "aadhaar_identity"
+        return "aadhaar_card"
     if lower in ["passport_identity", "passport", "indian_passport"]:
         return "passport_identity"
     if lower in ["voter_id", "voter_identity", "voter_id_identity", "epic_card", "election_card"]:
@@ -769,6 +906,17 @@ def normalize_document_type(raw_type: Optional[str], requirement_id: Optional[st
         return "driving_license"
     if lower in ["kyc_identity", "kyc", "identity_proof", "photo_identity", "government_identity", "sample_identity_proof", "kyc_document"]:
         return "kyc_identity"
+
+    # Specific Bank & Financial Normalization
+    if lower in ["bank_statement", "account_statement", "bank_account_statement",
+                  "bank_transaction_statement", "statement_of_account", "bank_details"]:
+        return "bank_statement"
+    if lower in [
+        "bank_account_document", "bank_account_details", "bank_account_verification",
+        "bank_passbook", "cancelled_cheque", "bank_account_confirmation",
+        "bank_verification_document", "bank_details_document", "bank_certificate"
+    ]:
+        return "bank_account_document"
 
     # Specific Property Normalization
     if lower in [
@@ -799,12 +947,42 @@ def normalize_document_type(raw_type: Optional[str], requirement_id: Optional[st
         return "payslip"
     if lower in ["salary_certificate", "salary_letter", "income_certificate", "employment_income_proof"]:
         return "salary_certificate"
-    if lower in ["itr_tax_return", "itr", "income_tax_return", "itr_1", "tax_return"]:
-        return "itr_tax_return"
+    if lower in ["itr_tax_return", "itr", "income_tax_return", "itr_1", "tax_return", "itr_gst_return", "gst_return", "business_itr"]:
+        return "itr_gst_return"
     if lower in ["form_16", "form16", "tds_certificate"]:
         return "form_16"
-    if lower in ["bank_statement", "account_statement", "bank_details"]:
+    if lower in ["bank_statement", "account_statement", "bank_account_statement", "bank_transaction_statement", "statement_of_account"]:
         return "bank_statement"
+    if lower in ["bank_account_document", "bank_account_details", "bank_account_verification",
+                  "bank_account_confirmation", "cancelled_cheque", "bank_certificate",
+                  "bank_passbook", "bank_verification_document", "bank_details_document"]:
+        return "bank_account_document"
+
+    # Specific Gold Document Normalization
+    if lower in [
+        "gold_security_document", "gold_security", "pledge_document", "security_document",
+        "gold_pledge", "gold_collateral", "gold_collateral_document", "gold_pledge_document",
+        "gold_pledge_agreement", "gold_security_declaration", "gold_loan_security"
+    ]:
+        return "gold_security_document"
+    if lower in [
+        "gold_valuation_report", "gold_valuation", "jewellery_valuation_report",
+        "gold_valuation_document", "jewellery_valuation", "gold_valuation_certificate",
+        "gold_appraisal_report", "gold_assessment_report", "gold_appraiser_report"
+    ]:
+        return "gold_valuation_report"
+
+    # Specific FD Document Normalization
+    if lower in [
+        "fd_statement", "fixed_deposit_statement", "statement_of_fixed_deposit",
+        "fixed_deposit_account_statement", "fd_account_statement", "fixed_deposit_ledger"
+    ]:
+        return "fd_statement"
+    if lower in [
+        "fixed_deposit_certificate_receipt", "fixed_deposit_certificate", "fixed_deposit_receipt",
+        "fixed_deposit_certificate_or_receipt", "fd_certificate", "fd_receipt", "fixed_deposit_receipt_certificate"
+    ]:
+        return "fixed_deposit_certificate_receipt"
 
     # Requirement Context Resolution for generic KYC
     if lower in ["kyc", "identity"] and requirement_id:
@@ -840,12 +1018,17 @@ def is_document_acceptable_for_requirement(detected_doc_type: str, requirement: 
     if not detected_doc_type or not requirement:
         return False
 
+    det_raw = detected_doc_type.lower().strip()
+    accepted_raw_clean = [a.lower().strip() for a in (requirement.accepted_document_types or [])]
+    if det_raw in accepted_raw_clean:
+        return True
+
     det = normalize_document_type(detected_doc_type, requirement.requirement_id)
     accepted_raw = requirement.accepted_document_types or []
     accepted = [normalize_document_type(a) for a in accepted_raw]
 
     # Exact normalized match
-    if det in accepted:
+    if det in accepted or det_raw in accepted:
         return True
 
     # =========================================================================
@@ -899,19 +1082,19 @@ def is_document_acceptable_for_requirement(detected_doc_type: str, requirement: 
     # KYC & IDENTITY FAMILY RULES
     # =========================================================================
     kyc_identity_family = {
-        "kyc_identity", "aadhaar_identity", "passport_identity",
+        "kyc_identity", "aadhaar_identity", "aadhaar_card", "passport_identity",
         "driving_license", "voter_identity"
     }
 
     # Student KYC slot accepts student_kyc or valid student identity documents
     if requirement.requirement_id == "edu_loan_student_kyc":
-        if det in ["student_kyc", "kyc_identity", "aadhaar_identity", "passport_identity", "voter_identity", "driving_license"]:
+        if det in ["student_kyc", "kyc_identity", "aadhaar_identity", "aadhaar_card", "passport_identity", "voter_identity", "driving_license"]:
             return True
         return False
 
     # Co-applicant KYC slot accepts co_applicant_kyc or co-applicant government ID
     if requirement.requirement_id == "edu_loan_co_app_kyc":
-        if det in ["co_applicant_kyc", "kyc_identity", "pan_card", "aadhaar_identity", "passport_identity", "voter_identity", "driving_license"]:
+        if det in ["co_applicant_kyc", "kyc_identity", "pan_card", "aadhaar_identity", "aadhaar_card", "passport_identity", "voter_identity", "driving_license"]:
             return True
         return False
 
@@ -932,7 +1115,7 @@ def is_document_acceptable_for_requirement(detected_doc_type: str, requirement: 
     # =========================================================================
     # INCOME / EMPLOYMENT FAMILY RULES
     # =========================================================================
-    salary_income_family = {"payslip", "salary_certificate", "employment_income_proof", "itr_tax_return", "form_16"}
+    salary_income_family = {"payslip", "salary_certificate", "employment_income_proof", "co_applicant_income_proof", "income_certificate", "tax_computation", "itr_tax_return", "itr_gst_return", "form_16"}
     if det in salary_income_family:
         if any(a in salary_income_family or "income" in a for a in accepted):
             return True
@@ -942,8 +1125,9 @@ def is_document_acceptable_for_requirement(detected_doc_type: str, requirement: 
     if det in employment_proof_family and any(a in employment_proof_family for a in accepted):
         return True
 
-    # Bank statement
-    if det in ["bank_statement", "business_bank_statement"] and any("bank" in a for a in accepted):
+    # Bank statement / bank account document cross-acceptance
+    bank_family = {"bank_statement", "business_bank_statement", "bank_account_document"}
+    if det in bank_family and any(a in bank_family or "bank" in a for a in accepted):
         return True
 
     return False

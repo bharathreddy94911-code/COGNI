@@ -268,16 +268,36 @@ EXTRACTION_SCHEMAS = {
         "IFSC", "statement_start_date", "statement_end_date", "opening_balance",
         "closing_balance", "transactions"
     ],
+    "bank_account_document": [
+        "account_holder_name", "account_holder", "bank_name", "branch",
+        "account_number", "ifsc_code", "account_type", "status"
+    ],
     "fixed_deposit_certificate": [
         "account_holder_name", "joint_holder_names", "bank_name", "branch",
         "account_number", "FD_number", "deposit_amount", "interest_rate",
         "deposit_date", "maturity_date", "maturity_amount", "tenure", "nominee", "currency"
+    ],
+    "fixed_deposit_certificate_receipt": [
+        "account_holder_name", "joint_holder_names", "bank_name", "branch",
+        "account_number", "FD_number", "deposit_amount", "interest_rate",
+        "deposit_date", "maturity_date", "maturity_amount", "tenure", "nominee", "currency"
+    ],
+    "fd_statement": [
+        "account_holder_name", "bank_name", "branch", "account_number",
+        "FD_number", "statement_start_date", "statement_end_date",
+        "opening_balance", "interest_credited", "closing_balance", "currency", "transactions"
     ],
     "gold_security_document": [
         "borrower_name", "valuation_date", "valuation_reference", "gold_description",
         "jewellery_description", "number_of_items", "gross_weight", "net_weight",
         "purity", "assessed_value", "market_value", "loan_value", "valuer_name",
         "appraiser_name", "security_reference"
+    ],
+    "gold_valuation_report": [
+        "borrower_name", "valuation_date", "valuation_reference", "gold_description",
+        "jewellery_description", "number_of_items", "gross_weight", "net_weight",
+        "purity", "assessed_value", "market_value", "loan_value", "valuer_name",
+        "appraiser_name"
     ],
     "land_record": [
         "farmer_name", "land_owner_name", "land_address", "survey_number",
@@ -2115,9 +2135,11 @@ def extract_with_deterministic_engine(text: str, doc_type: str) -> Dict[str, Ext
         return DeterministicExtractor.extract_profit_loss(text)
     elif doc_type == "balance_sheet":
         return DeterministicExtractor.extract_balance_sheet(text)
-    elif doc_type in ["fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document", "bank_account_document"]:
+    elif doc_type in ["fixed_deposit_certificate_receipt", "fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document"]:
         return DeterministicExtractor.extract_fixed_deposit(text)
-    elif doc_type in ["gold_security_document", "jewellery_valuation_report", "gold_valuation_document", "pledge_document", "gold_loan_document", "security_document"]:
+    elif doc_type == "bank_account_document":
+        return DeterministicExtractor.extract_bank_statement(text)
+    elif doc_type in ["gold_valuation_report", "gold_security_document", "jewellery_valuation_report", "gold_valuation_document", "pledge_document", "gold_loan_document", "security_document"]:
         return DeterministicExtractor.extract_gold_security(text)
     elif doc_type in ["land_record", "cultivation_record", "crop_document"]:
         return DeterministicExtractor.extract_land_record(text)

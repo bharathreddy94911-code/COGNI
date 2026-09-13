@@ -80,7 +80,6 @@ function RoleSelection({ colors, onSelect }) {
         {/* Mascot & Speech Bubble */}
         <div style={{ display: "flex", alignItems: "center", gap: "24px", marginBottom: "16px" }}>
           <motion.div
-             layoutId="shared-mascot-wrapper"
              animate={{ y: [0, -8, 0] }}
              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
           >
@@ -89,7 +88,7 @@ function RoleSelection({ colors, onSelect }) {
           <motion.div 
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ duration: 0.2 }}
             style={{
                background: colors.bubbleBg,
                color: colors.bubbleText,
@@ -110,7 +109,7 @@ function RoleSelection({ colors, onSelect }) {
         <motion.div 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
+          transition={{ duration: 0.2 }}
           style={{ textAlign: "center", marginBottom: "24px" }}
         >
           <h1 style={{ fontSize: "32px", fontWeight: 800, margin: "0 0 8px 0", color: colors.bubbleText }}>
@@ -127,7 +126,7 @@ function RoleSelection({ colors, onSelect }) {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
+            transition={{ duration: 0.2 }}
             onClick={() => onSelect("user")}
             style={{
               background: colors.panelBg, border: `1px solid ${colors.panelBorder}`, borderRadius: "24px",
@@ -152,7 +151,7 @@ function RoleSelection({ colors, onSelect }) {
             <div className="role-icon" style={{ background: `${colors.pillBg}15`, color: colors.pillBg, width: "64px", height: "64px", borderRadius: "16px", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "20px", transition: "transform 0.3s ease" }}>
               <User size={32} />
             </div>
-            <h3 style={{ fontSize: "24px", fontWeight: 700, margin: "0 0 12px 0", color: colors.bubbleText }}>User</h3>
+            <h3 style={{ fontSize: "24px", fontWeight: 700, margin: "0 0 12px 0", color: colors.bubbleText }}>Employee</h3>
             <p style={{ fontSize: "15px", color: colors.faint, lineHeight: 1.5, margin: "0 0 32px 0", flex: 1 }}>
               Apply for a loan and upload your documents.
             </p>
@@ -168,7 +167,7 @@ function RoleSelection({ colors, onSelect }) {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
+            transition={{ duration: 0.2 }}
             onClick={() => onSelect("admin")}
             style={{
               flex: 1,background: colors.panelBg, border: `1px solid ${colors.panelBorder}`, borderRadius: "24px",
@@ -577,7 +576,7 @@ const NAME_SUGGESTIONS = ["Bunny", "Lora", "Dara", "Alix", "Billie"];
 // ---------------------------------------------------------------------------
 // Login Form Component (User Side Authentication)
 // ---------------------------------------------------------------------------
-function LoginForm({ colors, theme, onComplete }) {
+function LoginForm({ colors, theme, onComplete, onStartOnboarding }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isResetSent, setIsResetSent] = useState(false);
@@ -599,12 +598,7 @@ function LoginForm({ colors, theme, onComplete }) {
         await authService.sendPasswordReset(email);
         setIsResetSent(true);
       } else if (isSignUp) {
-        if (!name.trim()) return setError("Name is required");
-        if (!email.trim() || !email.includes("@")) return setError("Valid email is required");
-        if (!password.trim() || password.length < 6) return setError("Password must be at least 6 chars");
-        setIsLoading(true);
-        const { user, isNewUser } = await authService.signUpWithEmail(name, email, password);
-        onComplete(user, isNewUser);
+        await handleGoogleAuth();
       } else {
         if (!email.trim() || !email.includes("@")) return setError("Valid email is required");
         if (!password.trim()) return setError("Password is required");
@@ -698,7 +692,7 @@ function LoginForm({ colors, theme, onComplete }) {
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.16C1.43 8.55 1 10.22 1 12s.43 3.45 1.16 4.93l3.68-2.84z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.16 7.07l3.68 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
-            {isLoading ? "Please wait..." : "Continue with Google"}
+            {isLoading ? "Please wait..." : (isSignUp ? "Sign up with Google" : "Continue with Google")}
           </button>
           
           <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0", color: colors.faint, fontSize: 13, fontWeight: 500 }}>
@@ -780,7 +774,12 @@ function LoginForm({ colors, theme, onComplete }) {
           </div>
         ) : (
           <div 
-            onClick={() => { if(!isLoading) { setIsSignUp(!isSignUp); setError(""); } }}
+            onClick={() => { 
+              if(!isLoading) { 
+                setIsSignUp(!isSignUp); 
+                setError(""); 
+              } 
+            }}
             style={{ color: colors.accent, fontWeight: 600, cursor: isLoading ? "default" : "pointer", marginLeft: isSignUp ? 0 : "auto" }}
           >
             {isSignUp ? "Already have an account? Sign in" : "Don't have an account? Sign up"}
@@ -797,23 +796,39 @@ export default function MascotOnboarding() {
     return localStorage.getItem("theme") || "light";
   });
 
-  const [appRole, setAppRole] = useState(() => {
-    return localStorage.getItem("mascot_appRole") || null;
-  });
-
   useEffect(() => {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
   const colors = theme === "dark" ? DARK_COLORS : LIGHT_COLORS;
 
-  const [step, setStep] = useState(() => {
-    const saved = localStorage.getItem('mascot_step');
-    return saved !== null ? parseInt(saved, 10) : 0;
-  });
-  
   const [hasEnteredApp, setHasEnteredApp] = useState(() => {
-    return localStorage.getItem('mascot_hasEnteredApp') === 'true';
+    const session = authService.getCurrentUser();
+    if (session && session.email) {
+      const reg = authService.getRegisteredUser(session.email) || session;
+      if (reg.role === 'BANK_EMPLOYEE' || reg.role === 'BANK_MANAGER') return true;
+      return !!reg.onboardingCompleted;
+    }
+    return false;
+  });
+
+  const [appRole, setAppRole] = useState(() => {
+    const session = authService.getCurrentUser();
+    if (session && session.email) {
+      const reg = authService.getRegisteredUser(session.email) || session;
+      if (reg.role === 'BANK_EMPLOYEE' || reg.role === 'BANK_MANAGER') return 'admin';
+      return 'user';
+    }
+    return localStorage.getItem("mascot_appRole") || null;
+  });
+
+  const [step, setStep] = useState(() => {
+    const session = authService.getCurrentUser();
+    if (!session) return 4;
+    const reg = authService.getRegisteredUser(session.email) || session;
+    if (reg.onboardingCompleted) return 4;
+    const saved = typeof reg.onboardingStep === 'number' ? reg.onboardingStep : 4;
+    return saved < 4 ? saved : 4;
   });
 
   const [employeeView, setEmployeeView] = useState(() => {
@@ -821,38 +836,105 @@ export default function MascotOnboarding() {
   });
 
   const [authData, setAuthData] = useState(() => {
+    const session = authService.getCurrentUser();
+    if (session && session.email) {
+      const reg = authService.getRegisteredUser(session.email) || session;
+      return { user: reg, isNewUser: !reg.onboardingCompleted };
+    }
     const saved = localStorage.getItem('mascot_authData');
     return saved ? JSON.parse(saved) : { user: null, isNewUser: false };
-  });
-
-  const [showWelcome, setShowWelcome] = useState(() => {
-    return localStorage.getItem('mascot_showWelcome') !== 'false';
   });
 
   useEffect(() => { localStorage.setItem('mascot_step', step); }, [step]);
   useEffect(() => { localStorage.setItem('mascot_hasEnteredApp', hasEnteredApp); }, [hasEnteredApp]);
   useEffect(() => { localStorage.setItem('mascot_employeeView', employeeView); }, [employeeView]);
   useEffect(() => { localStorage.setItem('mascot_authData', JSON.stringify(authData)); }, [authData]);
-  useEffect(() => { localStorage.setItem('mascot_showWelcome', showWelcome); }, [showWelcome]);
+
+  const [welcomeUser, setWelcomeUser] = useState(null);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
 
   const initialAuthLoadRef = useRef(true);
   const [userName, setUserName] = useState("");
   const [assistantName, setAssistantName] = useState("");
   const [inputVal, setInputVal] = useState("");
+  const [onboardingAnswers, setOnboardingAnswers] = useState({ name: "", age: "", city: "", profession: "" });
   const inputRef = useRef(null);
 
+  const handleAuthComplete = (user, isNewUser) => {
+    const cleanEmail = (user?.email || "").trim().toLowerCase();
+    const registered = (cleanEmail ? authService.getRegisteredUser(cleanEmail) : null) || user;
+    const nameToDisplay = registered?.name || registered?.displayName || user?.name || user?.displayName || (cleanEmail ? cleanEmail.split('@')[0] : 'user');
+
+    if (registered && registered.onboardingCompleted) {
+      setAuthData({ user: registered, isNewUser: false });
+      setAppRole('user');
+      setWelcomeUser({ ...(user || {}), ...(registered || {}), displayName: nameToDisplay, isNewUser: false });
+      setShowWelcomeBack(true);
+    } else {
+      const initialAnswers = {
+        name: registered?.onboardingData?.name || registered?.name || registered?.displayName || user?.name || user?.displayName || onboardingAnswers.name || "",
+        age: registered?.onboardingData?.age || onboardingAnswers.age || "",
+        city: registered?.onboardingData?.city || onboardingAnswers.city || "",
+        profession: registered?.onboardingData?.profession || onboardingAnswers.profession || ""
+      };
+      
+      setOnboardingAnswers(initialAnswers);
+      const startStep = typeof registered?.onboardingStep === 'number' && registered.onboardingStep < 4 ? registered.onboardingStep : 0;
+      setStep(startStep);
+      setInputVal(startStep === 0 && initialAnswers.name ? initialAnswers.name : "");
+      
+      setAuthData({ user: registered || user, isNewUser: true });
+      setAppRole('user');
+      setHasEnteredApp(false);
+    }
+  };
+
   useEffect(() => {
-    if (auth) {
-      const unsubscribe = auth.onAuthStateChanged((user) => {
-        if (initialAuthLoadRef.current) {
-          if (user) {
-            setAuthData({ user, isNewUser: false });
+    let unsubscribe = () => {};
+    const checkAuthStatus = () => {
+      const sessionUser = authService.getCurrentUser();
+      if (sessionUser && sessionUser.email) {
+        const cleanEmail = sessionUser.email.trim().toLowerCase();
+        const registered = authService.getRegisteredUser(cleanEmail) || sessionUser;
+        const isCompleted = !!registered.onboardingCompleted;
+
+        setAuthData({ user: registered, isNewUser: !isCompleted });
+
+        if (registered.role === 'BANK_EMPLOYEE' || registered.role === 'BANK_MANAGER') {
+          setAppRole('admin');
+          setHasEnteredApp(true);
+        } else if (isCompleted) {
+          setAppRole('user');
+          setHasEnteredApp(true);
+        } else {
+          setAppRole('user');
+          setHasEnteredApp(false);
+          if (registered.onboardingData) {
+            setOnboardingAnswers(registered.onboardingData);
           }
+          const savedStep = typeof registered.onboardingStep === 'number' ? registered.onboardingStep : 4;
+          const validStep = savedStep >= 0 && savedStep < 4 ? savedStep : 4;
+          setStep(validStep);
+        }
+      } else {
+        localStorage.removeItem('mascot_step');
+        localStorage.removeItem('mascot_hasEnteredApp');
+        setHasEnteredApp(false);
+        setStep(4);
+      }
+    };
+
+    if (auth && auth.onAuthStateChanged) {
+      unsubscribe = auth.onAuthStateChanged(() => {
+        if (initialAuthLoadRef.current) {
+          checkAuthStatus();
           initialAuthLoadRef.current = false;
         }
       });
-      return () => unsubscribe();
+    } else {
+      checkAuthStatus();
     }
+    return () => unsubscribe();
   }, []);
 
   // Conversation history: { type: 'bot' | 'user', text: string }
@@ -998,71 +1080,68 @@ export default function MascotOnboarding() {
     },
     {
       mood: "happy",
-      prompt: "You're all set! Let's get you signed in.",
-      body: <LoginForm colors={colors} theme={theme} onComplete={(user, isNewUser) => setAuthData({ user, isNewUser })} />,
-      canContinue: () => false, // Final stage, blocks advance button
+      prompt: "Please sign in or create an account to continue.",
+      body: <LoginForm colors={colors} theme={theme} onComplete={handleAuthComplete} />,
+      canContinue: () => false,
       getUserReply: () => null,
     }
   ];
 
   function advance() {
-    const current = steps[step];
-    if (!current.canContinue()) return;
+    const currentStepObj = steps[step];
+    if (!currentStepObj.canContinue()) return;
 
-    if (step === 0) setUserName(inputVal.trim());
-    
-    // We don't strictly need to store age/city/occupation in this demo, but the steps proceed correctly.
-    
-    if (step < steps.length - 1) {
+    const currentVal = inputVal.trim();
+    const updatedAnswers = { ...onboardingAnswers };
+
+    if (step === 0) {
+      setUserName(currentVal);
+      updatedAnswers.name = currentVal;
+    } else if (step === 1) {
+      updatedAnswers.age = currentVal;
+    } else if (step === 2) {
+      updatedAnswers.city = currentVal;
+    } else if (step === 3) {
+      updatedAnswers.profession = currentVal;
+    }
+    setOnboardingAnswers(updatedAnswers);
+
+    if (step === 3) {
+      if (authData.user && authData.user.email) {
+        const updated = authService.updateUserProfile(authData.user.email, updatedAnswers, true, 3);
+        setAuthData({ user: updated, isNewUser: false });
+        const nameToDisplay = updated.name || updated.displayName || updated.email.split('@')[0];
+        setWelcomeUser({ ...updated, displayName: nameToDisplay, isNewUser: true });
+        setShowWelcomeBack(true);
+      } else {
+        setInputVal("");
+        setStep(4);
+      }
+    } else if (step < steps.length - 1) {
+      const nextStep = step + 1;
+      if (authData.user && authData.user.email) {
+        authService.updateUserProfile(authData.user.email, updatedAnswers, false, nextStep);
+      }
       setInputVal("");
-      setStep((s) => s + 1);
+      setStep(nextStep);
     }
   }
 
-  const current = showWelcome ? {
+  const current = showWelcomeBack ? {
     mood: "happy",
-    prompt: "Hello! Welcome to Loan Document Processing.",
+    prompt: welcomeUser?.isNewUser 
+      ? `Welcome, ${welcomeUser?.displayName || welcomeUser?.name || 'user'}!`
+      : `Welcome back, ${welcomeUser?.displayName || welcomeUser?.name || 'user'}!`,
     body: (
-      <div style={{ display: "flex", width: "100%", justifyContent: "flex-end", marginTop: 14 }}>
-        <button
-          onClick={() => { setShowWelcome(false); localStorage.setItem('mascot_showWelcome', 'false'); }}
-          style={{
-            background: colors.accent,
-            color: colors.bgTop,
-            border: "none",
-            borderRadius: 999,
-            padding: "16px 32px",
-            fontSize: 16,
-            fontWeight: 700,
-            fontFamily: FONT,
-            cursor: "pointer",
-            transition: "all 0.2s ease",
-          }}
-        >
-          Continue
-        </button>
-      </div>
-    ),
-    canContinue: () => false // Handled entirely by the local button to avoid dual button rendering
-  } : authData.user ? {
-    mood: "happy",
-    prompt: authData.isNewUser ? `Welcome, ${authData.user.displayName || 'Friend'}!` : `Welcome back, ${authData.user.displayName || 'Friend'}!`,
-    body: (
-      <div className="auth-in" style={{ display: "flex", flexDirection: "column", alignSelf: "flex-end", marginLeft: "auto", width: "100%", maxWidth: 340, gap: 8 }}>
-        <style>{`
-          @keyframes authFadeSlideUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-          .auth-in {
-            animation: authFadeSlideUp 0.6s ease-out forwards;
-          }
-        `}</style>
-        <div style={{ color: colors.faint, fontSize: 16, marginBottom: 16, fontWeight: 500, lineHeight: 1.5 }}>
-          {authData.isNewUser ? "Your account is ready. Let's get started." : "Good to see you again. Let's continue."}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, width: "100%", maxWidth: 320, alignItems: "flex-start" }}>
+        <div style={{ fontSize: 15, color: colors.faint, fontWeight: 500 }}>
+          {welcomeUser?.isNewUser ? "Great to have you here. Let's continue." : "Good to see you again. Let's continue."}
         </div>
-        <button 
-          onClick={() => setHasEnteredApp(true)}
+        <button
+          onClick={() => {
+            setShowWelcomeBack(false);
+            setHasEnteredApp(true);
+          }}
           style={{
             width: "100%",
             padding: "16px 20px",
@@ -1074,14 +1153,15 @@ export default function MascotOnboarding() {
             fontWeight: 700,
             cursor: "pointer",
             fontFamily: FONT,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+            marginTop: 8,
+            boxSizing: "border-box"
           }}
         >
           Continue
         </button>
       </div>
     ),
-    canContinue: () => false,
+    canContinue: () => false
   } : (steps[step] || steps[steps.length - 1]);
 
   return (
@@ -1091,7 +1171,7 @@ export default function MascotOnboarding() {
         width: "100vw",
         height: "100vh",
         margin: 0,
-        overflow: "hidden",
+        overflow: hasEnteredApp ? "auto" : "hidden",
         background: `linear-gradient(180deg, ${colors.bgTop}, ${colors.bgBottom})`,
         position: "relative",
         display: "flex",
@@ -1105,11 +1185,26 @@ export default function MascotOnboarding() {
       {/* The Floating Mascot is now handled by Dashboard's ContextualMascot component,
          so we no longer render a separate one here to avoid duplication. */}
 
-      <LayoutGroup>
       <AnimatePresence mode="wait">
         {!hasEnteredApp ? (
-          appRole === null && !showWelcome ? (
-            <RoleSelection key="role-select" colors={colors} onSelect={(r) => { setAppRole(r); localStorage.setItem('mascot_appRole', r); }} />
+          appRole === null ? (
+            <RoleSelection key="role-select" colors={colors} onSelect={(r) => { 
+              setAppRole(r); 
+              localStorage.setItem('mascot_appRole', r); 
+              if (r === 'user') {
+                const session = authService.getCurrentUser();
+                if (session && session.email) {
+                  const reg = authService.getRegisteredUser(session.email) || session;
+                  if (reg.onboardingCompleted) {
+                    setHasEnteredApp(true);
+                  } else {
+                    setStep(typeof reg.onboardingStep === 'number' && reg.onboardingStep < 4 ? reg.onboardingStep : 4);
+                  }
+                } else {
+                  setStep(4);
+                }
+              }
+            }} />
           ) : appRole === 'admin' ? (
             <EmployeeLogin 
               key="admin-login" 
@@ -1121,7 +1216,10 @@ export default function MascotOnboarding() {
           ) : (
           <motion.div
             key="onboarding"
-            exit={{ opacity: 0, transition: { duration: 0.4 } }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}
           >
             <div
@@ -1138,7 +1236,6 @@ export default function MascotOnboarding() {
             >
               {/* Left Column: Native Mascot */}
               <motion.div 
-                layoutId="shared-mascot-wrapper"
                 style={{
                     display: "flex",
                     justifyContent: "center",
@@ -1201,7 +1298,12 @@ export default function MascotOnboarding() {
             >
               <button
                 onClick={() => {
-                    if (step > 0) {
+                    if (step === 4) {
+                        setAppRole(null);
+                        localStorage.removeItem('mascot_appRole');
+                    } else if (step === 0) {
+                        setStep(4);
+                    } else if (step > 0 && step < 4) {
                         setConversationLog(log => log.slice(0, -2));
                         setStep((s) => s - 1);
                     } else if (appRole === 'user') {
@@ -1214,19 +1316,18 @@ export default function MascotOnboarding() {
                   border: "none",
                   fontFamily: FONT,
                   fontWeight: 600,
-                  color: (step > 0 || appRole === 'user') ? colors.accent : colors.faint,
-                  cursor: (step > 0 || appRole === 'user') ? "pointer" : "default",
+                  color: colors.accent,
+                  cursor: "pointer",
                   fontSize: 15,
-                  opacity: (step > 0 || appRole === 'user') ? 1 : 0.5,
+                  opacity: 1,
                 }}
-                disabled={step === 0 && appRole !== 'user'}
               >
                 Back
               </button>
 
-              {appRole === 'user' && (
+              {appRole === 'user' && step < 4 && (
                   <div style={{ display: "flex", gap: 6 }}>
-                    {steps.map((_, i) => (
+                    {steps.slice(0, 4).map((_, i) => (
                       <div
                         key={i}
                         style={{
@@ -1271,8 +1372,9 @@ export default function MascotOnboarding() {
             key="dashboard"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
-            style={{ position: "absolute", inset: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ position: "absolute", inset: 0, overflowY: "auto" }}
           >
             {appRole === 'admin' ? (
               employeeView === 'dashboard' ? (
@@ -1282,13 +1384,17 @@ export default function MascotOnboarding() {
                   toggleTheme={toggleTheme}
                   onStartProcessing={() => setEmployeeView("processing")}
                   onSignOut={() => {
-                    setAuthData({ user: null, isNewUser: false });
-                    setHasEnteredApp(false);
-                    setAppRole(null);
+                    localStorage.removeItem('demo_session');
+                    localStorage.removeItem('auth_token');
                     localStorage.removeItem('mascot_appRole');
                     localStorage.removeItem('mascot_hasEnteredApp');
                     localStorage.removeItem('mascot_authData');
                     localStorage.removeItem('mascot_employeeView');
+                    auth.signOut();
+                    setAuthData({ user: null, isNewUser: false });
+                    setHasEnteredApp(false);
+                    setAppRole(null);
+                    setStep(4);
                   }} 
                 />
               ) : (
@@ -1306,16 +1412,25 @@ export default function MascotOnboarding() {
                 theme={theme} 
                 toggleTheme={toggleTheme}
                 onSignOut={() => {
-                  auth.signOut();
+                  localStorage.removeItem('demo_session');
+                  localStorage.removeItem('auth_token');
                   localStorage.removeItem('mascot_step');
                   localStorage.removeItem('mascot_hasEnteredApp');
                   localStorage.removeItem('mascot_authData');
                   localStorage.removeItem('mascot_appRole');
                   localStorage.removeItem('mascot_employeeView');
+                  localStorage.removeItem('currentPage');
+                  localStorage.removeItem('selectedLoanType');
+                  localStorage.removeItem('docStatuses');
+                  localStorage.removeItem('analysisResults');
+                  localStorage.removeItem('applicationId');
+                  auth.signOut();
                   setAuthData({ user: null, isNewUser: false });
                   setHasEnteredApp(false);
                   setAppRole(null);
-                  setStep(0);
+                  setStep(4);
+                  setOnboardingAnswers({ name: "", age: "", city: "", profession: "" });
+                  setInputVal("");
                 }} 
                 isEmployee={false}
               />
@@ -1323,7 +1438,6 @@ export default function MascotOnboarding() {
           </motion.div>
         )}
       </AnimatePresence>
-      </LayoutGroup>
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sen:wght@400;500;600;700;800&display=swap');

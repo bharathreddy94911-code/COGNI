@@ -1,31 +1,15 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+// Standalone Google Auth Module (Firebase-free)
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+export const auth = {
+  onAuthStateChanged: (callback) => {
+    try {
+      const session = JSON.parse(localStorage.getItem('demo_session'));
+      setTimeout(() => callback(session), 0);
+    } catch (_) {
+      setTimeout(() => callback(null), 0);
+    }
+    return () => {};
+  }
 };
 
-// Only initialize if config is present to prevent immediate crashes, 
-// though errors will be thrown when auth is attempted.
-let app;
-let auth;
-let googleProvider;
-
-try {
-  if (firebaseConfig.apiKey) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    googleProvider = new GoogleAuthProvider();
-  } else {
-    console.warn("Firebase configuration is missing. Please provide VITE_FIREBASE_API_KEY and other variables in your .env file.");
-  }
-} catch (error) {
-  console.error("Failed to initialize Firebase:", error);
-}
-
-export { auth, googleProvider };
+export const googleProvider = null;

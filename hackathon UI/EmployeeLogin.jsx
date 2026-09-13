@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowRight, Briefcase, Lock, User, AlertTriangle } from "lucide-react";
+import { ArrowRight, Briefcase, Lock, User, AlertTriangle, MapPin, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
 import { Mascot } from "./mascot-login-flow";
 import { authService } from "./authService";
@@ -7,29 +7,70 @@ import { authService } from "./authService";
 const FONT = `"Sen", ui-rounded, "SF Pro Rounded", system-ui, sans-serif`;
 
 export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
+    const [isSignUp, setIsSignUp] = useState(false);
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [name, setName] = useState("");
+    const [age, setAge] = useState("");
+    const [city, setCity] = useState("");
     const [error, setError] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!email || !password) {
-            setError("Please enter both email and password.");
-            return;
-        }
-
-        setIsSubmitting(true);
         setError(null);
 
-        try {
-            const res = await authService.signInWithEmail(email, password);
-            onLogin(res.user);
-        } catch (err) {
-            setError(err.message || "Authentication failed.");
-        } finally {
-            setIsSubmitting(false);
+        if (isSignUp) {
+            if (!name.trim()) {
+                setError("Please enter your name.");
+                return;
+            }
+            if (!email || !email.includes("@")) {
+                setError("Please enter a valid email address.");
+                return;
+            }
+            if (!password || password.length < 6) {
+                setError("Password must be at least 6 characters.");
+                return;
+            }
+            setIsSubmitting(true);
+            try {
+                const res = await authService.signUpAdmin(name, email, password, age, city);
+                onLogin(res.user);
+            } catch (err) {
+                setError(err.message || "Admin account creation failed.");
+            } finally {
+                setIsSubmitting(false);
+            }
+        } else {
+            if (!email || !password) {
+                setError("Please enter both email and password.");
+                return;
+            }
+            setIsSubmitting(true);
+            try {
+                const res = await authService.signInWithEmail(email, password);
+                onLogin(res.user);
+            } catch (err) {
+                setError(err.message || "Authentication failed.");
+            } finally {
+                setIsSubmitting(false);
+            }
         }
+    };
+
+    const inputStyle = {
+        width: "100%",
+        padding: "14px 16px 14px 44px",
+        borderRadius: "14px",
+        border: `1px solid ${colors.panelBorder}`,
+        background: theme === 'dark' ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.5)",
+        color: colors.bubbleText,
+        fontSize: "15px",
+        fontFamily: FONT,
+        outline: "none",
+        transition: "all 0.2s ease",
+        boxSizing: "border-box"
     };
 
     return (
@@ -122,14 +163,14 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                             flexDirection: "column",
                             alignItems: "center",
                             textAlign: "center",
-                            marginBottom: "24px" // space between bubble and mascot
+                            marginBottom: "24px"
                         }}
                     >
                         <h3 style={{ margin: "0 0 8px 0", fontSize: "18px", fontWeight: 700, color: colors.bubbleText, fontFamily: FONT }}>
-                            Welcome to the Admin Portal!
+                            {isSignUp ? "Create Admin Account" : "Welcome to the Admin Portal!"}
                         </h3>
                         <p style={{ margin: 0, color: colors.faint, fontSize: "14px", fontWeight: 400, lineHeight: 1.5, fontFamily: FONT }}>
-                            Sign in to review and manage loan applications.
+                            {isSignUp ? "Fill in your details to create an admin workspace." : "Sign in to review and manage loan applications."}
                         </p>
                         
                         {/* Pointer pointing down towards the mascot */}
@@ -137,7 +178,7 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                             position: "absolute",
                             bottom: "-10px",
                             left: "50%",
-                            marginLeft: "-10px", // centered horizontally
+                            marginLeft: "-10px",
                             width: "20px",
                             height: "20px",
                             background: colors.bubbleBg,
@@ -154,7 +195,7 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                     </motion.div>
                 </div>
 
-                {/* RIGHT SIDE: Login Card */}
+                {/* RIGHT SIDE: Login / Signup Card */}
                 <motion.div 
                     animate={{ opacity: isSubmitting ? 0.4 : 1, scale: isSubmitting ? 0.98 : 1 }}
                     transition={{ duration: 0.5 }}
@@ -176,10 +217,12 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                             <div style={{ background: `${colors.pillBg}15`, padding: "10px", borderRadius: "12px", color: colors.pillBg }}>
                                 <Briefcase size={24} />
                             </div>
-                            <h2 style={{ fontSize: "24px", fontWeight: 700, margin: 0, color: colors.bubbleText, fontFamily: FONT }}>Admin Sign In</h2>
+                            <h2 style={{ fontSize: "24px", fontWeight: 700, margin: 0, color: colors.bubbleText, fontFamily: FONT }}>
+                                {isSignUp ? "Admin Sign Up" : "Admin Sign In"}
+                            </h2>
                         </div>
                         <p style={{ color: colors.faint, fontSize: "14px", marginBottom: "24px", lineHeight: 1.5, fontFamily: FONT }}>
-                            Access your workspace to review and manage loan applications.
+                            {isSignUp ? "Enter your details to create an admin account." : "Access your workspace to review and manage loan applications."}
                         </p>
 
                         {error && (
@@ -189,9 +232,26 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                             </div>
                         )}
 
-                        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%" }}>
+                        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px", width: "100%" }}>
+                            {isSignUp && (
+                                <div style={{ width: "100%", boxSizing: "border-box" }}>
+                                    <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: colors.bubbleText, marginBottom: "6px", paddingLeft: "4px", fontFamily: FONT }}>Full Name</label>
+                                    <div style={{ position: "relative", width: "100%", boxSizing: "border-box" }}>
+                                        <div style={{ position: "absolute", left: "16px", top: "50%", transform: "translateY(-50%)", color: colors.faint }}>
+                                            <User size={18} />
+                                        </div>
+                                        <input 
+                                            placeholder="Admin Name"
+                                            value={name}
+                                            onChange={(e) => setName(e.target.value)}
+                                            style={inputStyle}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             <div style={{ width: "100%", boxSizing: "border-box" }}>
-                                <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: colors.bubbleText, marginBottom: "8px", paddingLeft: "4px", fontFamily: FONT }}>Admin Email</label>
+                                <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: colors.bubbleText, marginBottom: "6px", paddingLeft: "4px", fontFamily: FONT }}>Admin Email</label>
                                 <div style={{ position: "relative", width: "100%", boxSizing: "border-box" }}>
                                     <div style={{ position: "absolute", left: "16px", top: "50%", transform: "translateY(-50%)", color: colors.faint }}>
                                         <User size={18} />
@@ -201,18 +261,13 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
                                         placeholder="name@company.com"
-                                        style={{
-                                            width: "100%", padding: "14px 16px 14px 44px", borderRadius: "14px", border: `1px solid ${colors.panelBorder}`,
-                                            background: theme === 'dark' ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.5)",
-                                            color: colors.bubbleText, fontSize: "15px", fontFamily: FONT, outline: "none", transition: "all 0.2s ease",
-                                            boxSizing: "border-box"
-                                        }}
+                                        style={inputStyle}
                                     />
                                 </div>
                             </div>
 
                             <div style={{ width: "100%", boxSizing: "border-box" }}>
-                                <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: colors.bubbleText, marginBottom: "8px", paddingLeft: "4px", fontFamily: FONT }}>Password</label>
+                                <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: colors.bubbleText, marginBottom: "6px", paddingLeft: "4px", fontFamily: FONT }}>Password</label>
                                 <div style={{ position: "relative", width: "100%", boxSizing: "border-box" }}>
                                     <div style={{ position: "absolute", left: "16px", top: "50%", transform: "translateY(-50%)", color: colors.faint }}>
                                         <Lock size={18} />
@@ -222,21 +277,52 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         placeholder="••••••••"
-                                        style={{
-                                            width: "100%", padding: "14px 16px 14px 44px", borderRadius: "14px", border: `1px solid ${colors.panelBorder}`,
-                                            background: theme === 'dark' ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.5)",
-                                            color: colors.bubbleText, fontSize: "15px", fontFamily: FONT, outline: "none", transition: "all 0.2s ease",
-                                            boxSizing: "border-box"
-                                        }}
+                                        style={inputStyle}
                                     />
                                 </div>
                             </div>
+
+                            {isSignUp && (
+                                <>
+                                    <div style={{ display: "flex", gap: "12px", width: "100%" }}>
+                                        <div style={{ flex: 1, boxSizing: "border-box" }}>
+                                            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: colors.bubbleText, marginBottom: "6px", paddingLeft: "4px", fontFamily: FONT }}>Age</label>
+                                            <div style={{ position: "relative", width: "100%", boxSizing: "border-box" }}>
+                                                <div style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)", color: colors.faint }}>
+                                                    <Calendar size={16} />
+                                                </div>
+                                                <input 
+                                                    type="number"
+                                                    placeholder="e.g. 30"
+                                                    value={age}
+                                                    onChange={(e) => setAge(e.target.value)}
+                                                    style={{ ...inputStyle, paddingLeft: "38px" }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div style={{ flex: 1, boxSizing: "border-box" }}>
+                                            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: colors.bubbleText, marginBottom: "6px", paddingLeft: "4px", fontFamily: FONT }}>Area / City</label>
+                                            <div style={{ position: "relative", width: "100%", boxSizing: "border-box" }}>
+                                                <div style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)", color: colors.faint }}>
+                                                    <MapPin size={16} />
+                                                </div>
+                                                <input 
+                                                    placeholder="e.g. Mumbai"
+                                                    value={city}
+                                                    onChange={(e) => setCity(e.target.value)}
+                                                    style={{ ...inputStyle, paddingLeft: "38px" }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
 
                             <button 
                                 type="submit" 
                                 disabled={isSubmitting}
                                 style={{
-                                    marginTop: "16px",
+                                    marginTop: "12px",
                                     width: "100%",
                                     padding: "16px",
                                     borderRadius: "14px",
@@ -256,20 +342,34 @@ export default function EmployeeLogin({ colors, theme, onLogin, onBack }) {
                                     opacity: isSubmitting ? 0.8 : 1
                                 }}
                             >
-                                {isSubmitting ? "Signing In..." : "Sign In"}
+                                {isSubmitting 
+                                    ? (isSignUp ? "Creating Account..." : "Signing In...") 
+                                    : (isSignUp ? "Create Admin Account" : "Sign In")}
                                 {!isSubmitting && <ArrowRight size={18} />}
                             </button>
                         </form>
                         
-                        <div style={{ marginTop: "24px", textAlign: "center", width: "100%" }}>
+                        <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "10px", alignItems: "center", width: "100%" }}>
+                            <button 
+                                type="button"
+                                onClick={() => { if (!isSubmitting) { setIsSignUp(!isSignUp); setError(null); } }}
+                                style={{
+                                    background: "none", border: "none", color: colors.accent,
+                                    fontSize: "14px", fontWeight: 600, fontFamily: FONT, cursor: isSubmitting ? "default" : "pointer",
+                                    padding: "4px", transition: "color 0.2s ease"
+                                }}
+                            >
+                                {isSignUp ? "Already have an admin account? Sign in" : "Don't have an account? Sign up"}
+                            </button>
+
                             <button 
                                 type="button"
                                 onClick={onBack}
                                 disabled={isSubmitting}
                                 style={{
                                     background: "none", border: "none", color: colors.faint,
-                                    fontSize: "14px", fontWeight: 600, fontFamily: FONT, cursor: isSubmitting ? "default" : "pointer",
-                                    padding: "8px", transition: "color 0.2s ease"
+                                    fontSize: "13px", fontWeight: 500, fontFamily: FONT, cursor: isSubmitting ? "default" : "pointer",
+                                    padding: "4px", transition: "color 0.2s ease"
                                 }}
                                 onMouseOver={(e) => { if(!isSubmitting) e.target.style.color = colors.bubbleText }}
                                 onMouseOut={(e) => { if(!isSubmitting) e.target.style.color = colors.faint }}

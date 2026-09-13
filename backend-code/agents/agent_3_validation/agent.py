@@ -265,11 +265,23 @@ REQUIRED_FIELDS_PER_DOC_TYPE = {
     "business_bank_statement": [
         "business_name", "account_number", "bank_name"
     ],
+    "bank_account_document": [
+        "account_holder_name", "account_number", "bank_name"
+    ],
     "fixed_deposit_certificate": [
         "account_holder_name", "bank_name", "FD_number", "deposit_amount", "maturity_amount"
     ],
+    "fixed_deposit_certificate_receipt": [
+        "account_holder_name", "bank_name", "FD_number", "deposit_amount", "maturity_amount"
+    ],
+    "fd_statement": [
+        "account_holder_name", "bank_name", "account_number", "opening_balance", "closing_balance"
+    ],
     "gold_security_document": [
         "borrower_name", "valuation_date", "assessed_value"
+    ],
+    "gold_valuation_report": [
+        "borrower_name", "valuation_date", "assessed_value", "valuer_name"
     ],
     "land_record": [
         "farmer_name", "survey_number", "land_area"
@@ -413,7 +425,7 @@ class DeterministicValidator:
         # 4. Document-Specific Detailed Rules
         if doc_type == "payslip" or doc_type in ["salary_certificate", "employment_income_proof", "income_certificate", "co_applicant_income_proof"]:
             DeterministicValidator._validate_payslip(fields, findings, field_status_map)
-        elif doc_type == "bank_statement" or doc_type == "business_bank_statement":
+        elif doc_type in ["bank_statement", "business_bank_statement", "bank_account_document"]:
             DeterministicValidator._validate_bank_statement(fields, findings, field_status_map)
         elif doc_type == "itr_tax_return" or doc_type in ["tax_computation", "business_itr"]:
             DeterministicValidator._validate_itr(fields, findings, field_status_map)
@@ -433,9 +445,9 @@ class DeterministicValidator:
             DeterministicValidator._validate_education(fields, findings, field_status_map)
         elif doc_type in ["business_registration", "gst_certificate", "gst_return", "profit_loss_statement", "balance_sheet", "partnership_deed", "incorporation_certificate"]:
             DeterministicValidator._validate_business(fields, findings, field_status_map)
-        elif doc_type in ["fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document", "bank_account_document"]:
+        elif doc_type in ["fixed_deposit_certificate_receipt", "fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document"]:
             DeterministicValidator._validate_fixed_deposit(fields, findings, field_status_map)
-        elif doc_type in ["gold_security_document", "jewellery_valuation_report", "gold_valuation_document", "pledge_document", "gold_loan_document", "security_document"]:
+        elif doc_type in ["gold_valuation_report", "gold_security_document", "jewellery_valuation_report", "gold_valuation_document", "pledge_document", "gold_loan_document", "security_document"]:
             DeterministicValidator._validate_gold(fields, findings, field_status_map)
         elif doc_type in ["land_record", "cultivation_record", "crop_document", "agricultural_income_proof"]:
             DeterministicValidator._validate_agriculture(fields, findings, field_status_map)

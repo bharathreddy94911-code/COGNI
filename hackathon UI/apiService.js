@@ -58,7 +58,7 @@ export const apiService = {
         const formData = new FormData();
         formData.append("loan_type", loanType);
 
-        const response = await fetch(`${API_BASE_URL}/api/applications`, {
+        const response = await fetch(`${API_BASE_URL}/api/applications?loan_type=${loanType}`, {
             method: "POST",
             headers: getAuthHeaders(),
             body: formData
@@ -70,16 +70,21 @@ export const apiService = {
     /**
      * Upload a document to a specific slot
      */
-    async uploadDocument(file, requirementId, applicationId) {
+    async uploadDocument(file, requirementId, applicationId, signal = null) {
         const formData = new FormData();
         formData.append("requirement_id", requirementId);
         formData.append("file", file);
 
-        const response = await fetch(`${API_BASE_URL}/api/applications/${applicationId}/slot-upload`, {
+        const options = {
             method: "POST",
             headers: getAuthHeaders(),
             body: formData
-        });
+        };
+        if (signal) {
+            options.signal = signal;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/applications/${applicationId}/slot-upload`, options);
         if (!response.ok) {
             const error = await response.text();
             throw new Error(`Upload failed: ${error}`);

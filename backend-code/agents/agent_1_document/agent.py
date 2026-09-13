@@ -33,6 +33,8 @@ import json
 import time
 import math
 import logging
+import hashlib
+import uuid
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
@@ -71,17 +73,17 @@ logger = logging.getLogger("Agent1_DocumentClassifier")
 # Configuration Constants
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-CONFIDENCE_THRESHOLD = float(os.getenv("CLASSIFICATION_CONFIDENCE_THRESHOLD", "0.70"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CLASSIFICATION_CONFIDENCE_THRESHOLD", "0.60"))
 MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_FILE_SIZE_MB", "20")) * 1024 * 1024
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png", ".svg"}
 VALID_DOCUMENT_TYPES = {
     # Existing core categories
-    "payslip", "bank_statement", "itr_tax_return", "kyc_identity",
-    "employment_letter", "form_16", "address_proof", "other", "unknown", "unreadable",
+    "payslip", "bank_statement", "itr_tax_return", "itr_gst_return", "kyc_identity",
+    "employment_letter", "form_16", "address_proof", "other", "unknown", "unreadable", "needs_review",
 
     # Specific Identity / KYC
-    "pan_card", "aadhaar_identity", "passport_identity", "driving_license_identity",
+    "pan_card", "aadhaar_identity", "aadhaar_card", "passport_identity", "driving_license_identity",
     "voter_id_identity", "student_kyc", "student_identity", "co_applicant_kyc",
 
     # Income / Employment
@@ -108,7 +110,7 @@ VALID_DOCUMENT_TYPES = {
     "company_registration", "business_license",
 
     # Gold
-    "gold_security_document", "jewellery_valuation_report", "gold_valuation_document",
+    "gold_valuation_report", "gold_security_document", "jewellery_valuation_report", "gold_valuation_document",
     "pledge_document", "gold_loan_document", "security_document",
 
     # Agriculture
@@ -116,7 +118,7 @@ VALID_DOCUMENT_TYPES = {
     "agricultural_income_proof", "agricultural_loan_document", "farmer_certificate", "land_tax_receipt",
 
     # Fixed Deposit
-    "fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document", "bank_account_document",
+    "fixed_deposit_certificate_receipt", "fixed_deposit_certificate", "fixed_deposit_receipt", "fd_statement", "fd_loan_document", "bank_account_document",
 
     # Consumer Durable
     "product_quotation", "product_invoice", "purchase_invoice", "consumer_durable_loan_document", "product_warranty_document"
@@ -143,6 +145,19 @@ def sanitize_filename(filename: str) -> str:
     basename = os.path.basename(filename)
     sanitized = re.sub(r'[^\w\.-]', '_', basename)
     return sanitized or "unnamed_document"
+
+
+def compute_file_hash(file_path: str) -> str:
+    """Computes SHA-256 hash of file content."""
+    sha256 = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+    except Exception as e:
+        logger.warning(f"Failed to compute SHA-256 hash for {file_path}: {e}")
+        return "hash_error"
 
 
 def validate_file_security(file_path: str) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -485,19 +500,78 @@ def classify_with_rule_engine(document_text: str, filename: str) -> Dict[str, An
         }
 
     text_lower = document_text.lower()
+    filename_lower = (filename or "").lower()
+
+    # =========================================================================
+    # 0. CO-APPLICANT KYC & IDENTITY (HIGH-PRIORITY EVALUATION)
+    # =========================================================================
+    has_coapp_context = any(k in text_lower or k in filename_lower for k in [
+        "co-applicant", "coapplicant", "co applicant", "co_applicant", "co-app"
+    ])
+
+    has_explicit_coapp_kyc = any(k in text_lower or k in filename_lower for k in [
+        "co-applicant kyc", "co applicant kyc", "coapplicant kyc", "co_applicant_kyc",
+        "co-kyc", "coapplicant identity", "co-applicant identity", "co_applicant_identity",
+        "co-applicant pan", "co-applicant aadhaar", "co-applicant passport", "co-applicant voter",
+        "co-applicant driving", "co_applicant_pan", "co_applicant_aadhaar"
+    ])
+
+    has_salary_earnings_proof = any(k in text_lower for k in [
+        "payslip", "salary slip", "monthly payslip", "gross salary", "net pay",
+        "basic salary", "salary certificate", "form 16", "form-16", "itr", "tax return",
+        "income tax return", "annual income", "monthly income", "income proof", "income_proof"
+    ])
+
+    if has_explicit_coapp_kyc or (
+        has_coapp_context and
+        any(k in text_lower or k in filename_lower for k in ["kyc", "identity", "aadhaar", "passport", "voter id", "driving licence", "driving license"]) and
+        not has_salary_earnings_proof
+    ):
+        return {
+            "document_type": "co_applicant_kyc",
+            "confidence": 0.95,
+            "reasoning": "Detected Co-applicant KYC identity document signatures and relationship verification credentials.",
+            "error_type": None
+        }
+
+    # =========================================================================
+    # 0b. CO-APPLICANT INCOME PROOF EVALUATION
+    # =========================================================================
+    if has_coapp_context and has_salary_earnings_proof and not has_explicit_coapp_kyc:
+        return {
+            "document_type": "co_applicant_income_proof",
+            "confidence": 0.95,
+            "reasoning": "Detected co-applicant income proof and employment earnings credentials.",
+            "error_type": None
+        }
 
     # =========================================================================
     # 1. PAN CARD & SPECIFIC IDENTITY OVERRIDES
     # =========================================================================
     has_pan_regex = bool(re.search(r'\b[A-Z]{5}[0-9]{4}[A-Z]\b', document_text))
-    has_pan_wording = any(k in text_lower for k in ["permanent account number", "pan card", "income tax department", "govt. of india pan"])
-    is_tax_or_tds = any(k in text_lower for k in ["form no. 16", "form 16", "income tax return", "itr-1", "itr-2", "itr-4"])
+    has_pan_wording = any(k in text_lower for k in [
+        "permanent account number", "pan card", "income tax department", "govt. of india pan", "pan:"
+    ])
+    is_explicit_pan_filename = any(k in filename_lower for k in [
+        "02_pan_card", "pan_card", "permanent_account_number", "pan-card", "pan_doc"
+    ])
+    is_tax_or_tds = any(k in text_lower for k in [
+        "form no. 16", "form 16", "income tax return", "itr-1", "itr-2", "itr-3", "itr-4",
+        "itr", "gst", "gstr", "gstin", "gstr-3b", "gstr-1", "tax return", "assessment year",
+        "taxable income", "computation of income", "gst certificate", "gst registration",
+        "acknowledgement number", "itr_gst_return", "itr / gst return", "tax return acknowledgement",
+        "gross total income", "tax payable"
+    ])
+    has_payslip = any(k in text_lower for k in [
+        "payslip", "salary slip", "monthly payslip", "net pay"
+    ])
 
-    if (has_pan_regex or has_pan_wording) and not is_tax_or_tds:
+    if (has_pan_regex or has_pan_wording or is_explicit_pan_filename) and not is_tax_or_tds and not has_payslip:
         # Check if specifically part of Student or Co-applicant KYC record
         if "student" in text_lower and any(k in text_lower for k in ["student kyc", "student id", "student name", "admission"]):
             return {"document_type": "student_kyc", "confidence": 0.95, "reasoning": "Detected Student KYC identity record.", "error_type": None}
-        if any(k in text_lower for k in ["co-applicant", "co applicant", "coapplicant"]) and any(k in text_lower for k in ["kyc", "parent", "spouse", "guarantor"]):
+        if (any(k in text_lower or k in filename_lower for k in ["co-applicant", "co applicant", "coapplicant", "co_applicant", "co-app"]) and
+            any(k in text_lower or k in filename_lower for k in ["kyc", "parent", "spouse", "guarantor", "co-applicant-pan", "co_applicant_pan", "co-applicant pan", "identity"])):
             return {"document_type": "co_applicant_kyc", "confidence": 0.95, "reasoning": "Detected Co-applicant KYC identity record.", "error_type": None}
         return {"document_type": "pan_card", "confidence": 0.95, "reasoning": "Detected Permanent Account Number (PAN) card signatures.", "error_type": None}
 
@@ -534,7 +608,7 @@ def classify_with_rule_engine(document_text: str, filename: str) -> Dict[str, An
     if any(k in text_lower for k in ["driving licence", "driving license", "motor vehicles act", "licence to drive", "license to drive", "dl no", "transport department"]):
         return {"document_type": "driving_license", "confidence": 0.95, "reasoning": "Detected Motor Vehicle Driving Licence credentials.", "error_type": None}
 
-    if any(k in text_lower for k in [
+    if not (has_pan_regex or has_pan_wording or is_explicit_pan_filename) and any(k in text_lower for k in [
         "government identity", "identity proof", "identity document", "identity number",
         "identity reference", "sample identity proof", "photo identity", "date of birth",
         "dob:", "dob ", "father's name", "permanent address", "issuing authority", "kyc document"
@@ -548,11 +622,25 @@ def classify_with_rule_engine(document_text: str, filename: str) -> Dict[str, An
     if any(k in text_lower for k in ["property tax", "municipal tax receipt", "tax receipt number", "assessment tax", "tax paid receipt", "municipal corporation tax", "tax assessment"]):
         return {"document_type": "property_tax_receipt", "confidence": 0.95, "reasoning": "Detected municipal property tax receipt and assessment details.", "error_type": None}
 
-    # 4b. Property Valuation Report (check before Title to prevent confusion)
+    # 4a-2. Gold Security Document & Gold Valuation Report (High Priority)
+    if any(k in filename_lower for k in ["gold_security", "gold security", "pledge", "collateral", "03_gold_security"]) or any(k in text_lower for k in [
+        "gold security document", "gold security", "pledge document", "pledge receipt",
+        "security pledge", "gold pledge", "collateral security", "gold collateral"
+    ]):
+        return {"document_type": "gold_security_document", "confidence": 0.95, "reasoning": "Detected gold jewellery security pledge document.", "error_type": None}
+
     if any(k in text_lower for k in [
+        "gold valuation report", "jewellery valuation report", "ornament valuation report",
+        "gold valuation certificate", "appraiser report", "appraisal report", "valuation certificate"
+    ]) or (any(k in filename_lower for k in ["valuation_report", "valuation report", "04_gold_valuation"]) and "gold" in text_lower):
+        return {"document_type": "gold_valuation_report", "confidence": 0.95, "reasoning": "Detected gold jewellery valuation assessment report.", "error_type": None}
+
+    # 4b. Property Valuation Report (Real Estate / Building Valuation)
+    is_gold_doc = any(k in text_lower for k in ["gold", "jewellery", "ornament", "carat", "purity"])
+    if not is_gold_doc and (any(k in text_lower for k in [
         "property valuation", "real estate valuation", "plot valuation", "building valuation",
         "forced sale value", "fair market value", "assessed value", "valuer report", "property inspection report"
-    ]) or ("valuation" in text_lower and any(k in text_lower for k in ["engineer", "valuer", "market value", "inspection"])):
+    ]) or ("valuation" in text_lower and any(k in text_lower for k in ["engineer", "valuer", "market value", "inspection"]))):
         return {"document_type": "property_valuation_report", "confidence": 0.95, "reasoning": "Detected certified property valuation assessment report.", "error_type": None}
 
     # 4c. Sale Deed & Conveyance Deed
@@ -587,13 +675,26 @@ def classify_with_rule_engine(document_text: str, filename: str) -> Dict[str, An
     ]):
         return {"document_type": "cultivation_record", "confidence": 0.95, "reasoning": "Detected agricultural crop cultivation record or cultivation information.", "error_type": None}
 
-    # 4i. Property Title Document
+    # 4i. Financial Statements (High-Priority Check Before Property Title)
     if any(k in text_lower for k in [
+        "balance sheet", "total assets", "total liabilities", "current assets", "shareholders equity",
+        "equity and liabilities", "statement of financial position", "audited balance sheet", "as at march 31"
+    ]):
+        return {"document_type": "balance_sheet", "confidence": 0.95, "reasoning": "Detected financial Balance Sheet structure.", "error_type": None}
+
+    if any(k in text_lower for k in ["profit and loss", "profit & loss", "p&l statement", "operating expenses", "gross profit", "net profit"]):
+        return {"document_type": "profit_loss_statement", "confidence": 0.95, "reasoning": "Detected Profit and Loss statement headers.", "error_type": None}
+
+    # 4j. Property Title Document
+    is_financial_stmt = any(k in text_lower for k in [
+        "balance sheet", "profit and loss", "profit & loss", "total assets", "total liabilities", "shareholders equity"
+    ])
+    if not is_financial_stmt and (any(k in text_lower for k in [
         "property and title", "property or title", "property title", "title deed",
         "ownership deed", "title reference", "sample-title-", "title status",
         "property owner", "property schedule", "survey reference", "declared owner",
         "ownership status", "property and title documents", "property or title documents"
-    ]) or ("property" in text_lower and any(k in text_lower for k in ["title", "owner", "boundaries", "schedule of property"])):
+    ]) or ("property" in text_lower and any(k in text_lower for k in ["title", "owner", "boundaries", "schedule of property"]))):
         return {"document_type": "property_title_document", "confidence": 0.95, "reasoning": "Detected property title and registered ownership details.", "error_type": None}
 
     # =========================================================================
@@ -618,25 +719,70 @@ def classify_with_rule_engine(document_text: str, filename: str) -> Dict[str, An
     if any(k in text_lower for k in ["co-applicant", "coapplicant", "co applicant", "co-app"]) and any(k in text_lower for k in ["income", "salary", "payslip", "gross salary", "net pay"]):
         return {"document_type": "co_applicant_income_proof", "confidence": 0.95, "reasoning": "Detected co-applicant income proof details.", "error_type": None}
 
+    # Payslip check (evaluate before salary_certificate to avoid false matches on gross salary)
+    payslip_keywords = ["payslip", "salary slip", "monthly payslip", "net pay", "basic salary", "pay period", "deductions"]
+    matched_payslip = [k for k in payslip_keywords if k in text_lower]
+    if matched_payslip or ("gross salary" in text_lower and any(k in text_lower for k in ["net pay", "deductions", "basic salary", "payslip"])):
+        return {
+            "document_type": "payslip",
+            "confidence": 0.95,
+            "matched_indicators": matched_payslip or ["payslip_keywords"],
+            "warnings": [],
+            "requires_manual_review": False,
+            "reasoning": "Detected payslip earnings header and payroll structure.",
+            "error_type": None
+        }
+
     # Employer salary certificate / employment income proof
+    salary_cert_keywords = ["salary certificate", "employment and income", "employment income proof", "employer or source", "employment since", "annual income", "income eligibility", "monthly gross income"]
+    matched_cert = [k for k in salary_cert_keywords if k in text_lower]
+    if matched_cert or ("income proof" in text_lower and any(k in text_lower for k in ["employer", "occupation", "software engineer", "employee", "salary", "employment"])):
+        return {
+            "document_type": "salary_certificate",
+            "confidence": 0.95,
+            "matched_indicators": matched_cert or ["salary_certificate_keywords"],
+            "warnings": [],
+            "requires_manual_review": False,
+            "reasoning": "Detected employer salary certificate and employment income proof.",
+            "error_type": None
+        }
+
     if any(k in text_lower for k in [
-        "salary certificate", "employment and income", "employment income proof",
-        "employer or source", "employment since", "annual income", "income eligibility",
-        "gross salary", "monthly gross income"
-    ]) or ("income proof" in text_lower and any(k in text_lower for k in ["employer", "occupation", "software engineer", "employee", "salary", "employment"])):
-        return {"document_type": "salary_certificate", "confidence": 0.95, "reasoning": "Detected employer salary certificate and employment income proof.", "error_type": None}
-
-    if any(k in text_lower for k in ["payslip", "salary slip", "monthly payslip", "gross salary", "net payable salary", "net pay", "basic salary", "pay period"]):
-        return {"document_type": "payslip", "confidence": 0.95, "reasoning": "Detected payslip earnings header and payroll structure.", "error_type": None}
-
-    if any(k in text_lower for k in ["income tax return", "itr-1", "itr-2", "itr-4", "assessment year", "taxable income", "tax payable", "form 1040", "gross total income"]):
-        return {"document_type": "itr_tax_return", "confidence": 0.95, "reasoning": "Detected Income Tax Return (ITR) headers and tax computation keywords.", "error_type": None}
+        "income tax return", "itr-1", "itr-2", "itr-3", "itr-4", "itr / gst return", "itr_gst_return",
+        "itr", "gst return", "gstr-3b", "gstr-1", "assessment year", "taxable income", "tax payable",
+        "form 1040", "gross total income", "tax return acknowledgement", "computation of income"
+    ]):
+        return {"document_type": "itr_gst_return", "confidence": 0.95, "reasoning": "Detected ITR / GST Return headers and tax computation keywords.", "error_type": None}
 
     if any(k in text_lower for k in ["form no. 16", "form 16", "section 203", "tax deducted at source", "certificate under section 203"]):
         return {"document_type": "form_16", "confidence": 0.95, "reasoning": "Detected Form 16 TDS certificate signatures.", "error_type": None}
 
-    if any(k in text_lower for k in ["account statement", "bank statement", "opening balance", "closing balance", "debit", "credit", "ledger balance", "available balance", "bank details", "account number"]) or ("bank" in text_lower and ("account" in text_lower or "balance" in text_lower or "transactions" in text_lower)):
-        return {"document_type": "bank_statement", "confidence": 0.95, "reasoning": "Detected bank account statement headers and transaction ledger.", "error_type": None}
+    has_fd_keywords = any(k in text_lower for k in ["fixed deposit", "term deposit", "fd statement", "fd receipt", "fd number", "fd account", "fixed_deposit"])
+    if not has_fd_keywords:
+        has_statement_indicators = any(k in filename_lower for k in [
+            "bank_statement", "04_bank_statement", "bank_account_statement", "statement_of_account", "bank_transaction_statement"
+        ]) or any(k in text_lower for k in [
+            "bank statement", "bank account statement", "account statement",
+            "bank transaction statement", "statement of account", "statement period",
+            "opening balance", "closing balance", "running balance"
+        ]) or (
+            "bank" in text_lower and any(k in text_lower for k in ["statement period", "transactions", "opening balance", "closing balance", "transaction history"])
+        )
+
+        has_bank_account_doc_indicators = any(k in filename_lower for k in [
+            "bank_account_document", "04_bank_account_document", "cancelled_cheque",
+            "bank_passbook", "bank_account_details", "bank_certificate", "bank_verification"
+        ]) or any(k in text_lower for k in [
+            "cancelled cheque", "bank account document", "bank account details",
+            "bank account verification", "bank account confirmation", "bank certificate",
+            "bank passbook"
+        ])
+
+        if has_statement_indicators and not any(k in filename_lower or k in text_lower for k in ["cancelled_cheque", "cancelled cheque"]):
+            return {"document_type": "bank_statement", "confidence": 0.95, "reasoning": "Detected bank account statement headers and transaction ledger.", "error_type": None}
+
+        if has_bank_account_doc_indicators:
+            return {"document_type": "bank_account_document", "confidence": 0.95, "reasoning": "Detected general bank account document / account ownership proof.", "error_type": None}
 
     if any(k in text_lower for k in ["office id", "company id", "employee id", "staff id", "employee card", "staff card", "employee identity card", "company identity card", "corporate id"]):
         return {"document_type": "office_id", "confidence": 0.95, "reasoning": "Detected employee office identity card signatures.", "error_type": None}
@@ -683,11 +829,55 @@ def classify_with_rule_engine(document_text: str, filename: str) -> Dict[str, An
     if any(k in text_lower for k in ["certificate of incorporation", "business registration", "shop and establishment", "partnership deed", "udyam registration"]):
         return {"document_type": "business_registration", "confidence": 0.90, "reasoning": "Detected business registration or incorporation certificate.", "error_type": None}
 
-    if any(k in text_lower for k in ["gold valuation", "jewellery valuation", "ornament valuation", "gold weight", "carat", "purity", "appraiser report", "pledge receipt"]) or ("gold" in text_lower and "valuation" in text_lower):
-        return {"document_type": "gold_security_document", "confidence": 0.90, "reasoning": "Detected gold jewellery valuation and security pledge record.", "error_type": None}
+    if any(k in text_lower or k in filename_lower for k in [
+        "gold security document", "gold security", "pledge document", "pledge receipt",
+        "security pledge", "gold pledge", "collateral document", "gold collateral",
+        "security declaration", "pledge agreement", "gold loan security", "03_gold_security_document"
+    ]):
+        return {"document_type": "gold_security_document", "confidence": 0.95, "reasoning": "Detected gold collateral security pledge document.", "error_type": None}
 
-    if any(k in text_lower for k in ["fixed deposit", "term deposit receipt", "fd receipt", "fd number", "maturity amount", "maturity date", "deposit amount"]):
-        return {"document_type": "fixed_deposit_certificate", "confidence": 0.95, "reasoning": "Detected Fixed Deposit (FD) certificate or term deposit receipt.", "error_type": None}
+    if any(k in text_lower or k in filename_lower for k in [
+        "gold valuation report", "jewellery valuation report", "ornament valuation",
+        "gold valuation certificate", "gold appraisal report", "gold assessment report",
+        "jeweller valuation certificate", "appraiser report", "valuer report", "gold_valuation_report"
+    ]) or (
+        ("gold" in text_lower or "jewellery" in text_lower or "ornament" in text_lower) and
+        any(k in text_lower for k in ["valuation", "appraisal", "assessed value", "market value", "valuer", "appraiser"]) and
+        not any(k in text_lower or k in filename_lower for k in ["pledge", "collateral", "security declaration"])
+    ):
+        return {"document_type": "gold_valuation_report", "confidence": 0.95, "reasoning": "Detected gold jewellery valuation assessment report.", "error_type": None}
+
+    # 7a. Bank Account Document / Bank Statement (Explicit Account Proof)
+    is_explicit_bank_account_doc = any(k in filename_lower for k in [
+        "04_bank_account_document", "bank_account_document", "bank_statement",
+        "bank_passbook", "cancelled_cheque", "bank_account_details", "bank_verification"
+    ]) or any(k in text_lower for k in [
+        "bank account document", "bank account statement", "account holder",
+        "ifsc code", "savings account", "current account",
+        "bank passbook", "cancelled cheque", "bank account details", "bank verification document"
+    ])
+
+    if is_explicit_bank_account_doc and not any(k in text_lower for k in [
+        "fixed deposit certificate", "fixed deposit receipt", "term deposit certificate",
+        "fd receipt", "maturity amount", "maturity date"
+    ]) and not any(k in filename_lower for k in ["fixed_deposit", "fd_receipt", "fd_certificate", "03_fixed_deposit"]):
+        return {"document_type": "bank_account_document", "confidence": 0.95, "reasoning": "Detected bank account document / bank proof details.", "error_type": None}
+
+    if any(k in text_lower for k in [
+        "fd statement", "fixed deposit statement", "statement of fixed deposit",
+        "fixed deposit account statement", "fd account statement", "fixed deposit ledger"
+    ]) or (
+        any(k in filename_lower for k in ["fd_statement", "fixed_deposit_statement"])
+    ):
+        return {"document_type": "fd_statement", "confidence": 0.95, "reasoning": "Detected Fixed Deposit account statement / transaction ledger details.", "error_type": None}
+
+    if any(k in text_lower for k in [
+        "fixed deposit certificate", "fixed deposit receipt", "term deposit receipt",
+        "fd receipt", "term deposit certificate", "fixed deposit advice", "deposit certificate", "deposit receipt"
+    ]) or any(k in filename_lower for k in [
+        "fixed_deposit_certificate", "fixed_deposit_receipt", "fd_receipt", "fd_certificate", "03_fixed_deposit"
+    ]):
+        return {"document_type": "fixed_deposit_certificate_receipt", "confidence": 0.95, "reasoning": "Detected Fixed Deposit Certificate / Receipt headers.", "error_type": None}
 
     if any(k in text_lower for k in [
         "product quotation", "quotation reference", "quoted product price",
@@ -721,6 +911,19 @@ def classify_with_ollama(document_text: str, filename: str) -> Dict[str, Any]:
 
     truncated_text = document_text[:3000]
 
+    # Quick socket check to verify Ollama port reachability
+    import socket
+    from urllib.parse import urlparse
+    parsed_url = urlparse(OLLAMA_BASE_URL)
+    host = parsed_url.hostname or "localhost"
+    port = parsed_url.port or 11434
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            pass
+    except Exception:
+        # Fast fallback when Ollama is offline
+        return classify_with_rule_engine(document_text, filename)
+
     # Try LangChain ChatOllama integration
     try:
         try:
@@ -737,7 +940,7 @@ def classify_with_ollama(document_text: str, filename: str) -> Dict[str, Any]:
             base_url=OLLAMA_BASE_URL,
             model=OLLAMA_MODEL,
             temperature=0.0,
-            timeout=3.0
+            timeout=1.0
         )
         prompt_tmpl = ChatPromptTemplate.from_template(CLASSIFICATION_PROMPT)
         chain = prompt_tmpl | llm
@@ -789,13 +992,18 @@ def node_validate_input(state: LoanDocumentState) -> LoanDocumentState:
     current_doc = docs[idx]
     file_path = current_doc.get("file_path", "")
 
+    req_id = current_doc.get("request_id") or str(uuid.uuid4())
+    f_hash = compute_file_hash(file_path) if file_path and os.path.exists(file_path) else "missing_hash"
+    current_doc["request_id"] = req_id
+    current_doc["file_hash"] = f_hash
+
     is_valid, err_msg, err_type = validate_file_security(file_path)
     current_doc["security_valid"] = is_valid
     current_doc["error_msg"] = err_msg
     current_doc["error_type"] = err_type
 
     if not is_valid:
-        logger.warning(f"Validation failed for {file_path}: {err_msg}")
+        logger.warning(f"[{req_id}] Validation failed for {file_path}: {err_msg}")
 
     state["current_document"] = current_doc
     return state
@@ -860,8 +1068,11 @@ def node_classify_document(state: LoanDocumentState) -> LoanDocumentState:
     if not current_doc.get("can_classify", False):
         # Default unclassifiable result
         current_doc["classification_result"] = {
-            "document_type": "unknown",
+            "document_type": "needs_review",
             "confidence": 0.0,
+            "matched_indicators": [],
+            "warnings": [f"Unclassifiable document ({current_doc.get('error_type', 'parsing_failed')})."],
+            "requires_manual_review": True,
             "reasoning": f"Unclassifiable document ({current_doc.get('error_type', 'parsing_failed')}).",
             "error_type": current_doc.get("error_type", "unclassifiable_document")
         }
@@ -887,36 +1098,49 @@ def node_validate_classification(state: LoanDocumentState) -> LoanDocumentState:
     res = current_doc.get("classification_result", {})
 
     raw_doc_type = res.get("document_type", "unknown")
-    conf = res.get("confidence", 0.0)
+    conf = float(res.get("confidence", 0.0))
     reasoning = res.get("reasoning", "")
+    matched_ind = res.get("matched_indicators", [])
+    warnings = list(res.get("warnings", []))
     err_type = res.get("error_type") or current_doc.get("error_type")
 
-    # Contextual normalization if requirement_id or loan_type is in current_doc
     req_id = current_doc.get("requirement_id")
     loan_type = current_doc.get("loan_type")
     norm_doc_type = normalize_document_type(raw_doc_type, req_id, loan_type)
 
-    # Enforce CLASSIFICATION_CONFIDENCE_THRESHOLD
-    if conf < CONFIDENCE_THRESHOLD and raw_doc_type != "unknown":
+    req_uuid = current_doc.get("request_id") or str(uuid.uuid4())
+    file_hash = current_doc.get("file_hash") or "unknown_hash"
+    requires_manual_review = False
+
+    # Enforce CLASSIFICATION_CONFIDENCE_THRESHOLD (0.60)
+    if conf < CONFIDENCE_THRESHOLD and raw_doc_type not in ["unknown", "needs_review"]:
         logger.warning(
-            f"Low confidence ({conf:.2f} < {CONFIDENCE_THRESHOLD}) for {current_doc.get('filename')}. Overriding category '{raw_doc_type}' to 'unknown'."
+            f"[{req_uuid}] Low confidence ({conf:.2f} < {CONFIDENCE_THRESHOLD}) for {current_doc.get('filename')}. Marking as 'needs_review'."
         )
         reasoning = f"[LOW CONFIDENCE OVERRIDE: {conf:.2f} < threshold {CONFIDENCE_THRESHOLD}] Original prediction: {raw_doc_type}. {reasoning}"
-        raw_doc_type = "unknown"
-        norm_doc_type = "unknown"
-        status = "unknown"
+        raw_doc_type = "needs_review"
+        norm_doc_type = "needs_review"
+        status = "needs_review"
+        requires_manual_review = True
+        warnings.append(f"Low classification confidence score ({conf:.2f} < {CONFIDENCE_THRESHOLD}). Underwriter review required.")
+    elif raw_doc_type == "needs_review" or norm_doc_type == "needs_review":
+        status = "needs_review"
+        requires_manual_review = True
     elif err_type or raw_doc_type == "unknown":
         status = "failed" if err_type in ["missing_file", "file_too_large", "corrupted_pdf", "signature_mismatch", "ollama_unavailable", "OCR_FAILED", "TEXT_NOT_AVAILABLE"] else "unknown"
+        requires_manual_review = True
     else:
         status = "success"
 
-    # Print Agent 1 Classification Debug Panel
+    # Log & Print Agent 1 Classification Debug Panel
     logger.info(
-        f"[AGENT 1 DEBUG PANEL] File: {current_doc.get('filename')} | Type: {raw_doc_type} (Norm: {norm_doc_type}) | Conf: {conf:.2f} | Method: {current_doc.get('extraction_method')} | OCR used: {current_doc.get('ocr_used')} | OCR success: {current_doc.get('ocr_success')} | Text: {len(current_doc.get('extracted_text', ''))} chars"
+        f"[AGENT 1 DEBUG PANEL] ReqID: {req_uuid} | Hash: {file_hash[:10]}... | File: {current_doc.get('filename')} | Type: {raw_doc_type} (Norm: {norm_doc_type}) | Conf: {conf:.2f} | Method: {current_doc.get('extraction_method')} | OCR used: {current_doc.get('ocr_used')} | OCR success: {current_doc.get('ocr_success')} | Text: {len(current_doc.get('extracted_text', ''))} chars"
     )
     print("\n" + "=" * 60)
     print("[AGENT 1 DEBUG PANEL] Document Classification")
     print("=" * 60)
+    print(f"Request ID            : {req_uuid}")
+    print(f"SHA-256 File Hash     : {file_hash}")
     print(f"Filename              : {current_doc.get('filename')}")
     print(f"File Path             : {current_doc.get('file_path')}")
     print(f"Page Count            : {current_doc.get('page_count', 1)}")
@@ -927,6 +1151,9 @@ def node_validate_classification(state: LoanDocumentState) -> LoanDocumentState:
     print(f"Classification Result : {raw_doc_type}")
     print(f"Normalized Doc Type   : {norm_doc_type}")
     print(f"Confidence Score      : {conf:.2f}")
+    print(f"Requires Review       : {requires_manual_review}")
+    print(f"Matched Indicators    : {matched_ind}")
+    print(f"Warnings              : {warnings}")
     print(f"Reasoning             : {reasoning}")
     print("=" * 60 + "\n")
 
@@ -934,13 +1161,18 @@ def node_validate_classification(state: LoanDocumentState) -> LoanDocumentState:
     try:
         pydantic_res = DocumentClassificationResult(
             document_id=current_doc.get("document_id", "doc_001"),
+            request_id=req_uuid,
+            file_hash=file_hash,
             filename=sanitize_filename(current_doc.get("filename", "unknown")),
-            file_extension=Path(current_doc.get("file_path", "")).suffix.lower(),
+            file_extension=Path(current_doc.get("file_path", "")).suffix.lower() if current_doc.get("file_path") else ".unknown",
             file_path=current_doc.get("file_path"),
             document_type=raw_doc_type,
             normalized_document_type=norm_doc_type,
             confidence=conf,
             classification_reason=reasoning,
+            matched_indicators=matched_ind,
+            warnings=warnings,
+            requires_manual_review=requires_manual_review,
             text_available=current_doc.get("text_available", False),
             text_length=len(current_doc.get("extracted_text", "")),
             page_count=current_doc.get("page_count", 1),
@@ -958,12 +1190,17 @@ def node_validate_classification(state: LoanDocumentState) -> LoanDocumentState:
         logger.error(f"Pydantic schema validation failed: {ve}")
         current_doc["validated_pydantic"] = DocumentClassificationResult(
             document_id=current_doc.get("document_id", "doc_001"),
+            request_id=req_uuid,
+            file_hash=file_hash,
             filename=sanitize_filename(current_doc.get("filename", "unknown")),
             file_extension=".unknown",
-            document_type="unknown",
-            normalized_document_type="unknown",
+            document_type="needs_review",
+            normalized_document_type="needs_review",
             confidence=0.0,
             classification_reason=f"Pydantic schema validation failure: {str(ve)}",
+            matched_indicators=[],
+            warnings=[f"Pydantic schema validation error: {str(ve)}"],
+            requires_manual_review=True,
             text_available=False,
             text_length=0,
             page_count=0,

@@ -6,7 +6,7 @@ import {
   AlertTriangle, ShieldAlert, CreditCard, Briefcase, Building, 
   Home, GraduationCap, Car, Coins, Tractor, Moon, Sun, X, ArrowRight,
   Upload, Check, RefreshCw, Trash2, Cpu, File, AlertCircle, ShoppingBag, Tv, Wallet, Plane, Triangle,
-  Layers, XCircle, Download
+  Layers, XCircle, Download, LogOut
 } from "lucide-react";
 import { Mascot } from "./mascot-login-flow";
 
@@ -104,10 +104,12 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
   const [loanTypes, setLoanTypes] = useState([]);
   const [reqDocs, setReqDocs] = useState([]);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(null); // Reference ID
   
   const scrollRef = useRef(null);
+  const uploadControllersRef = useRef({});
 
   useEffect(() => {
       if (scrollRef.current) {
@@ -166,42 +168,94 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
           return;
       }
 
+      // Phase 5: Cancel in-flight upload for this slot to prevent race conditions
+      if (uploadControllersRef.current[docId]) {
+          uploadControllersRef.current[docId].abort();
+      }
+
+      const controller = new AbortController();
+      uploadControllersRef.current[docId] = controller;
+
+      // Phase 5: Reset slot state before uploading
       setDocStatuses(prev => ({
           ...prev,
-          [docId]: { files: filesArray, status: 'uploading' }
+          [docId]: { files: filesArray, status: 'uploading', error: null, slotData: null, detectedType: null, confidence: null, request_id: null }
       }));
 
       try {
-          const data = await apiService.uploadDocument(file, docId, applicationId);
+          const data = await apiService.uploadDocument(file, docId, applicationId, controller.signal);
+          
+          if (uploadControllersRef.current[docId] !== controller) {
+              return; // Superseded request
+          }
+
           if (data && data.slot) {
               const status = data.slot.status;
+              const agentId = data.agent_id || data.agent_result?.agentId || data.slot?.agent_id;
+              const agentName = data.agent_name || data.agent_result?.agentName || data.slot?.agent_name;
+              const confidenceVal = data.confidence || data.agent_result?.confidenceScore || data.slot?.confidence;
+              const reqId = data.request_id || data.agent_result?.requestId;
+
               if (status === 'accepted') {
                   setDocStatuses(prev => ({
                       ...prev,
-                      [docId]: { files: filesArray, status: 'accepted', error: null, slotData: data.slot }
+                      [docId]: {
+                          files: filesArray,
+                          status: 'accepted',
+                          error: null,
+                          slotData: data.slot,
+                          request_id: reqId,
+                          confidence: confidenceVal,
+                          agent_id: agentId,
+                          agent_name: agentName,
+                          agent_result: data.agent_result
+                      }
                   }));
               } else if (status === 'wrong_document') {
                   setDocStatuses(prev => ({
                       ...prev,
-                      [docId]: { files: filesArray, status: 'wrong_document', error: data.slot.error, slotData: data.slot }
+                      [docId]: {
+                          files: filesArray,
+                          status: 'wrong_document',
+                          error: data.slot.error || data.agent_result?.message || 'Document type mismatch',
+                          slotData: data.slot,
+                          request_id: reqId,
+                          agent_id: agentId,
+                          agent_name: agentName,
+                          agent_result: data.agent_result
+                      }
                   }));
               } else {
                   setDocStatuses(prev => ({
                       ...prev,
-                      [docId]: { files: filesArray, status: 'error', error: data.slot.error || 'Upload failed' }
+                      [docId]: { files: filesArray, status: 'error', error: data.slot.error || 'Upload failed', request_id: reqId }
                   }));
               }
           } else {
               setDocStatuses(prev => ({
                   ...prev,
-                  [docId]: { files: filesArray, status: 'accepted', error: null }
+                  [docId]: {
+                      files: filesArray,
+                      status: 'accepted',
+                      error: null,
+                      request_id: data.request_id || data.agent_result?.requestId,
+                      agent_id: data.agent_id || data.agent_result?.agentId,
+                      agent_name: data.agent_name || data.agent_result?.agentName,
+                      agent_result: data.agent_result
+                  }
               }));
           }
       } catch (err) {
-          setDocStatuses(prev => ({
-              ...prev,
-              [docId]: { files: filesArray, status: 'error', error: err.message }
-          }));
+          if (err.name === 'AbortError') {
+              console.log(`[Upload Aborted] Slot '${docId}' superseded by newer upload.`);
+              return;
+          }
+          if (uploadControllersRef.current[docId] === controller) {
+              setDocStatuses(prev => ({
+                  ...prev,
+                  [docId]: { files: filesArray, status: 'error', error: err.message }
+              }));
+          }
       }
   };
 
@@ -313,7 +367,7 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
       
       {/* Fixed Top Navigation */}
       <div style={{
-        position: "sticky", top: 0, zIndex: 10, background: colors.panelBg,
+        position: "sticky", top: 0, zIndex: 999999, background: colors.panelBg,
         backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
         borderBottom: `1px solid ${colors.panelBorder}`, padding: "16px 24px 16px 100px",
         display: "flex", justifyContent: "space-between", alignItems: "center"
@@ -323,13 +377,196 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
         </h1>
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
           {/* Search and Bell removed as per requirement */}
-          <button style={iconBtnStyle(colors)}><Settings size={18} /></button>
-          <button onClick={toggleTheme} style={iconBtnStyle(colors)}>
+          <button onClick={toggleTheme} style={iconBtnStyle(colors)} title="Toggle Theme">
              {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
           </button>
-          <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: colors.pillBg, display: "flex", alignItems: "center", justifyContent: "center", color: "white", cursor: "pointer", marginLeft: "8px" }} onClick={() => setShowLogoutConfirm(true)}>
-            <User size={18} />
-          </div>
+          
+          {/* User Profile Avatar Logo & Modal */}
+          {(() => {
+              const currentUser = JSON.parse(localStorage.getItem('demo_session') || '{}');
+              const authData = JSON.parse(localStorage.getItem('mascot_authData') || '{}');
+              const isEmp = isEmployee || currentUser.role === 'BANK_EMPLOYEE' || currentUser.role === 'BANK_MANAGER';
+              const userName = currentUser.displayName || currentUser.name || currentUser.full_name || authData?.user?.displayName || authData?.user?.name || "Bank Employee";
+              const userEmail = currentUser.email || authData?.user?.email || "employee@bank.com";
+              const userRole = "BANK_EMPLOYEE";
+              const initial = userName.charAt(0).toUpperCase();
+
+              return (
+                  <div style={{ position: "relative" }}>
+                      <button
+                          onClick={() => setShowProfileModal(prev => !prev)}
+                          title="View Profile"
+                          style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              background: showProfileModal 
+                                  ? (theme === 'dark' ? "rgba(26,115,232,0.25)" : "rgba(26,115,232,0.12)")
+                                  : (theme === 'dark' ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)"),
+                              border: showProfileModal 
+                                  ? "2px solid #1A73E8" 
+                                  : `1px solid ${colors.panelBorder}`,
+                              padding: "4px 14px 4px 4px", borderRadius: 24,
+                              cursor: "pointer", fontFamily: "inherit", color: colors.bubbleText,
+                              boxShadow: showProfileModal ? "0 0 14px rgba(26,115,232,0.4)" : "none",
+                              transition: "all 0.2s ease"
+                          }}
+                      >
+                          <div style={{
+                              width: 34, height: 34, borderRadius: "50%",
+                              background: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)",
+                              color: "#FFFFFF",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontWeight: 800, fontSize: 15,
+                              boxShadow: "0 2px 6px rgba(26,115,232,0.4)"
+                          }}>
+                              {initial}
+                          </div>
+                          <div style={{ textAlign: "left" }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2, color: colors.bubbleText }}>{userName.split(' ')[0]}</div>
+                              <div style={{ fontSize: 10, color: colors.faint, fontWeight: 600 }}>Bank Employee</div>
+                          </div>
+                      </button>
+
+                      {/* Profile Floating Card Modal */}
+                      <AnimatePresence>
+                          {showProfileModal && (
+                              <>
+                                  {/* Transparent Outside Click Backdrop */}
+                                  <div 
+                                      onClick={() => setShowProfileModal(false)}
+                                      style={{
+                                          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+                                          zIndex: 999999, background: "transparent"
+                                      }}
+                                  />
+                                  <motion.div
+                                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                                      transition={{ duration: 0.15, ease: "easeOut" }}
+                                      style={{
+                                          position: "absolute", right: 0, top: "calc(100% + 10px)", zIndex: 1000000,
+                                          width: "330px", 
+                                          background: theme === 'dark' ? '#181E2A' : '#FFFFFF',
+                                          color: theme === 'dark' ? '#F8FAFC' : '#0F172A',
+                                          border: theme === 'dark' ? '1px solid rgba(255,255,255,0.22)' : '1px solid rgba(0,0,0,0.15)',
+                                          borderRadius: "18px", padding: "20px",
+                                          boxShadow: theme === 'dark' 
+                                              ? "0 20px 60px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.2)" 
+                                              : "0 20px 60px rgba(0, 0, 0, 0.22), 0 0 1px rgba(0, 0, 0, 0.1)",
+                                          fontFamily: "inherit"
+                                      }}
+                                  >
+                                      {/* Header Row */}
+                                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                                          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                                              <div style={{
+                                                  width: 48, height: 48, borderRadius: "50%",
+                                                  background: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)",
+                                                  color: "#FFFFFF",
+                                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                                  fontWeight: 800, fontSize: 20,
+                                                  boxShadow: "0 4px 12px rgba(26,115,232,0.4)",
+                                                  flexShrink: 0
+                                              }}>
+                                                  {initial}
+                                              </div>
+                                              <div style={{ overflow: "hidden" }}>
+                                                  <div style={{ 
+                                                      fontWeight: 800, fontSize: 16, 
+                                                      color: theme === 'dark' ? '#FFFFFF' : '#0F172A', 
+                                                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" 
+                                                  }}>
+                                                      {userName}
+                                                  </div>
+                                                  <div style={{ 
+                                                      fontSize: 12, fontWeight: 500,
+                                                      color: theme === 'dark' ? '#94A3B8' : '#475569', 
+                                                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                                      marginTop: 2
+                                                  }}>
+                                                      {userEmail}
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <button
+                                              onClick={() => setShowProfileModal(false)}
+                                              style={{
+                                                  background: theme === 'dark' ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)",
+                                                  border: "none", borderRadius: "50%",
+                                                  width: 26, height: 26,
+                                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                                  color: theme === 'dark' ? '#94A3B8' : '#64748B',
+                                                  cursor: "pointer", transition: "all 0.2s ease"
+                                              }}
+                                              onMouseEnter={(e) => e.currentTarget.style.color = theme === 'dark' ? '#FFFFFF' : '#000000'}
+                                          >
+                                              ✕
+                                          </button>
+                                      </div>
+
+                                      {/* User Details Box */}
+                                      <div style={{ 
+                                          background: theme === 'dark' ? 'rgba(255,255,255,0.05)' : '#F8FAFC',
+                                          border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : '#E2E8F0'}`,
+                                          borderRadius: "14px",
+                                          padding: "14px", margin: "14px 0", 
+                                          display: "flex", flexDirection: "column", gap: 10, fontSize: 13 
+                                      }}>
+                                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                              <span style={{ color: theme === 'dark' ? '#94A3B8' : '#64748B', fontWeight: 600 }}>Account Role</span>
+                                              <span style={{ 
+                                                  fontWeight: 800, color: "#1A73E8", 
+                                                  background: theme === 'dark' ? 'rgba(26,115,232,0.2)' : 'rgba(26,115,232,0.1)',
+                                                  padding: "2px 8px", borderRadius: "6px", fontSize: 11
+                                              }}>
+                                                  {userRole}
+                                              </span>
+                                          </div>
+                                          {applicationId && (
+                                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                  <span style={{ color: theme === 'dark' ? '#94A3B8' : '#64748B', fontWeight: 600 }}>Application ID</span>
+                                                  <span style={{ fontWeight: 700, color: theme === 'dark' ? '#F1F5F9' : '#1E293B' }}>{applicationId}</span>
+                                              </div>
+                                          )}
+                                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                              <span style={{ color: theme === 'dark' ? '#94A3B8' : '#64748B', fontWeight: 600 }}>Account Status</span>
+                                              <span style={{ 
+                                                  fontWeight: 800, color: "#16A34A",
+                                                  background: theme === 'dark' ? 'rgba(22,163,74,0.2)' : 'rgba(22,163,74,0.1)',
+                                                  padding: "2px 8px", borderRadius: "6px", fontSize: 11,
+                                                  display: "flex", alignItems: "center", gap: 6
+                                              }}>
+                                                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#16A34A" }} />
+                                                  Active & Verified
+                                              </span>
+                                          </div>
+                                      </div>
+
+                                      <button 
+                                          onClick={() => {
+                                              setShowProfileModal(false);
+                                              setShowLogoutConfirm(true);
+                                          }}
+                                          style={{
+                                              width: "100%", padding: "10px", borderRadius: "10px",
+                                              background: "rgba(220,38,38,0.1)", 
+                                              border: "1px solid rgba(220,38,38,0.25)",
+                                              color: "#DC2626", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                                              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                                              fontFamily: "inherit", transition: "all 0.2s ease"
+                                          }}
+                                          onMouseEnter={(e) => e.currentTarget.style.background = "rgba(220,38,38,0.18)"}
+                                          onMouseLeave={(e) => e.currentTarget.style.background = "rgba(220,38,38,0.1)"}
+                                      >
+                                          <LogOut size={16} /> Sign Out
+                                      </button>
+                                  </motion.div>
+                              </>
+                          )}
+                      </AnimatePresence>
+                  </div>
+              );
+          })()}
         </div>
       </div>
 
@@ -474,6 +711,11 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                                                                 <div style={{ color: "#34A853", fontWeight: 700, marginBottom: "4px" }}>✓ ACCEPTED</div>
                                                                 <div style={{ color: colors.bubbleText }}>{filename}</div>
                                                                 <div style={{ color: colors.faint, fontSize: "12px", marginTop: "4px" }}>Document type: {doc.label}</div>
+                                                                {(statusObj.agent_name || statusObj.slotData?.agent_name) && (
+                                                                    <div style={{ color: colors.pillBg, fontSize: "11px", fontWeight: 700, marginTop: "4px" }}>
+                                                                        Processed by: {statusObj.agent_name || statusObj.slotData?.agent_name} ({statusObj.agent_id || statusObj.slotData?.agent_id})
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                         {status === 'unsupported_type' && (
@@ -604,9 +846,9 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                     </div>
 
                     {/* Header */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "32px", background: "rgba(15,23,42,0.6)", padding: "24px", borderRadius: "20px", border: `1px solid ${colors.panelBorder}`, backdropFilter: "blur(12px)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "32px", background: colors.panelBg, padding: "24px", borderRadius: "20px", border: `1px solid ${colors.panelBorder}`, backdropFilter: "blur(12px)" }}>
                         <div>
-                            <h2 style={{ fontSize: "28px", fontWeight: 800, margin: "0 0 16px 0", color: "white" }}>Analysis Complete</h2>
+                            <h2 style={{ fontSize: "28px", fontWeight: 800, margin: "0 0 16px 0", color: colors.bubbleText }}>Analysis Complete</h2>
                             <div style={{ display: "flex", gap: "24px" }}>
                                 <div>
                                     <div style={{ fontSize: "12px", color: colors.faint, marginBottom: "4px" }}>Application ID</div>
@@ -640,32 +882,32 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "24px" }}>
                         
                         {/* ROW 1: Final Decision & Risk */}
-                        <div style={{ ...cardStyle(colors), background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", color: "white", display: "flex", flexDirection: "column", minHeight: "280px" }}>
+                        <div style={{ ...cardStyle(colors), display: "flex", flexDirection: "column", minHeight: "280px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px" }}>
                                 <ShieldAlert size={24} color="#3B82F6" />
-                                <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>Final Decision</h3>
+                                <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: colors.bubbleText }}>Final Decision</h3>
                             </div>
-                            <h2 style={{ fontSize: "48px", fontWeight: 800, margin: "0 0 8px 0", letterSpacing: "-1px", color: analysisResults.finalDecision === "PASS" ? "#4ADE80" : (analysisResults.finalDecision === "REJECT" ? "#F87171" : "#FBBF24") }}>
+                            <h2 style={{ fontSize: "48px", fontWeight: 800, margin: "0 0 8px 0", letterSpacing: "-1px", color: (analysisResults.finalDecision === "PASS" || analysisResults.finalDecision === "APPROVED") ? "#34A853" : ((analysisResults.finalDecision === "REJECT" || analysisResults.finalDecision === "REJECTED") ? "#EA4335" : "#F59E0B") }}>
                                 {analysisResults.finalDecision || "PENDING"}
                             </h2>
-                            <div style={{ display: "inline-block", background: "rgba(255,255,255,0.1)", padding: "6px 12px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, marginBottom: "24px", width: "fit-content" }}>
+                            <div style={{ display: "inline-block", background: `${colors.panelBorder}60`, padding: "6px 12px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, color: colors.bubbleText, marginBottom: "24px", width: "fit-content" }}>
                                 Underwriter Review: {analysisResults.requiresReview || "NO"}
                             </div>
-                            <div style={{ marginTop: "auto", background: "rgba(0,0,0,0.2)", padding: "16px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.05)" }}>
-                                <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", marginBottom: "4px" }}>Decision Reason</div>
-                                <p style={{ fontSize: "14px", lineHeight: 1.6, margin: 0, color: "rgba(255,255,255,0.9)" }}>{analysisResults.rationale || "Not available"}</p>
+                            <div style={{ marginTop: "auto", background: theme === 'dark' ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.03)", padding: "16px", borderRadius: "12px", border: `1px solid ${colors.panelBorder}` }}>
+                                <div style={{ fontSize: "12px", color: colors.faint, marginBottom: "4px" }}>Decision Reason</div>
+                                <p style={{ fontSize: "14px", lineHeight: 1.6, margin: 0, color: colors.bubbleText }}>{analysisResults.rationale || "Not available"}</p>
                             </div>
                         </div>
 
                         <div style={{ ...cardStyle(colors), display: "flex", flexDirection: "column", minHeight: "280px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
                                 <AlertTriangle size={24} color="#F59E0B" />
-                                <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: "white" }}>Risk Assessment</h3>
+                                <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: colors.bubbleText }}>Risk Assessment</h3>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: "32px", marginBottom: "32px" }}>
                                 <div>
                                     <div style={{ fontSize: "13px", color: colors.faint, marginBottom: "8px" }}>Risk Score</div>
-                                    <div style={{ fontSize: "48px", fontWeight: 800, color: "white", lineHeight: 1 }}>{analysisResults.riskSummary?.score || "0 / 100"}</div>
+                                    <div style={{ fontSize: "48px", fontWeight: 800, color: colors.bubbleText, lineHeight: 1 }}>{analysisResults.riskSummary?.score || "0 / 100"}</div>
                                 </div>
                                 <div style={{ width: "1px", height: "60px", background: colors.panelBorder }} />
                                 <div>
@@ -683,7 +925,7 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                                 <FileText size={20} color={colors.faint} />
                                 <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: colors.bubbleText }}>Executive Summary</h3>
                             </div>
-                            <p style={{ fontSize: "15px", lineHeight: 1.6, color: "rgba(255,255,255,0.8)", margin: 0 }}>
+                            <p style={{ fontSize: "15px", lineHeight: 1.6, color: colors.bubbleText, margin: 0 }}>
                                 {analysisResults.executiveSummary || "Not available"}
                             </p>
                         </div>
@@ -720,8 +962,8 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                         {/* ROW 4: Document Verification */}
                         <div style={{ ...cardStyle(colors), gridColumn: "span 2" }}>
                             <h3 style={{ fontSize: "16px", color: colors.bubbleText, marginTop: 0, marginBottom: "20px", fontWeight: 700 }}>Document Verification (Classification)</h3>
-                            <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: "12px", overflow: "hidden", border: `1px solid ${colors.panelBorder}` }}>
-                                <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 2fr 1fr 1fr", padding: "12px 16px", background: "rgba(255,255,255,0.05)", borderBottom: `1px solid ${colors.panelBorder}`, fontSize: "12px", fontWeight: 600, color: colors.faint }}>
+                            <div style={{ background: theme === 'dark' ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.03)", borderRadius: "12px", overflow: "hidden", border: `1px solid ${colors.panelBorder}` }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 2fr 1fr 1fr", padding: "12px 16px", background: theme === 'dark' ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)", borderBottom: `1px solid ${colors.panelBorder}`, fontSize: "12px", fontWeight: 600, color: colors.faint }}>
                                     <div>Document Name</div>
                                     <div>Expected Type</div>
                                     <div>Detected Type</div>
@@ -731,15 +973,15 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                                 {analysisResults.classificationSummary && analysisResults.classificationSummary.length > 0 ? (
                                     analysisResults.classificationSummary.map((doc, idx) => (
                                         <div key={idx} style={{ display: "grid", gridTemplateColumns: "2fr 2fr 2fr 1fr 1fr", padding: "16px", borderBottom: idx < analysisResults.classificationSummary.length - 1 ? `1px solid ${colors.panelBorder}` : "none", fontSize: "14px", alignItems: "center" }}>
-                                            <div style={{ color: "white", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: "16px" }}>{doc.name}</div>
-                                            <div style={{ color: colors.faint }}>{doc.expectedType}</div>
-                                            <div style={{ color: colors.faint }}>{doc.detectedType}</div>
+                                            <div style={{ color: colors.bubbleText, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: "16px" }}>{doc.name}</div>
+                                            <div style={{ color: colors.bubbleText }}>{doc.expectedType}</div>
+                                            <div style={{ color: colors.bubbleText }}>{doc.detectedType}</div>
                                             <div>
                                                 <span style={{ padding: "4px 8px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, background: doc.status === 'ACCEPTED' ? "rgba(52,168,83,0.1)" : "rgba(234,67,53,0.1)", color: doc.status === 'ACCEPTED' ? "#34A853" : "#EA4335" }}>
                                                     {doc.status}
                                                 </span>
                                             </div>
-                                            <div style={{ textAlign: "right", color: "white", fontWeight: 600 }}>{doc.confidence}</div>
+                                            <div style={{ textAlign: "right", color: colors.bubbleText, fontWeight: 600 }}>{doc.confidence}</div>
                                         </div>
                                     ))
                                 ) : (
@@ -833,9 +1075,9 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                 {analysisResults.keyFindings && analysisResults.keyFindings.length > 0 ? (
                                     analysisResults.keyFindings.map((finding, idx) => (
-                                        <div key={idx} style={{ display: "flex", gap: "12px", alignItems: "flex-start", padding: "12px", background: "rgba(255,255,255,0.03)", borderRadius: "8px" }}>
+                                        <div key={idx} style={{ display: "flex", gap: "12px", alignItems: "flex-start", padding: "12px", background: theme === 'dark' ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)", borderRadius: "8px" }}>
                                             <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3B82F6", marginTop: "8px", flexShrink: 0 }} />
-                                            <div style={{ fontSize: "14px", lineHeight: 1.5, color: "rgba(255,255,255,0.9)" }}>{finding}</div>
+                                            <div style={{ fontSize: "14px", lineHeight: 1.5, color: colors.bubbleText }}>{finding}</div>
                                         </div>
                                     ))
                                 ) : (
@@ -851,7 +1093,7 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                                     analysisResults.recommendations.map((rec, idx) => (
                                         <div key={idx} style={{ display: "flex", gap: "12px", alignItems: "flex-start", padding: "12px", background: "rgba(52,168,83,0.05)", borderRadius: "8px", border: "1px solid rgba(52,168,83,0.1)" }}>
                                             <CheckCircle size={16} color="#34A853" style={{ marginTop: "2px", flexShrink: 0 }} />
-                                            <div style={{ fontSize: "14px", lineHeight: 1.5, color: "rgba(255,255,255,0.9)" }}>{rec}</div>
+                                            <div style={{ fontSize: "14px", lineHeight: 1.5, color: colors.bubbleText }}>{rec}</div>
                                         </div>
                                     ))
                                 ) : (
@@ -861,10 +1103,10 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                         </div>
 
                         {/* BOTTOM: Final Summary */}
-                        <div style={{ ...cardStyle(colors), gridColumn: "span 2", background: "linear-gradient(90deg, rgba(15,23,42,0.8) 0%, rgba(30,41,59,0.8) 100%)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ ...cardStyle(colors), gridColumn: "span 2", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                             <div>
-                                <div style={{ fontSize: "14px", color: colors.faint, marginBottom: "8px", fontWeight: 600 }}>FINAL DECISION / RECOMMENDED ACTION</div>
-                                <h3 style={{ fontSize: "24px", fontWeight: 800, margin: 0, color: "white" }}>{analysisResults.finalDecision || "PENDING"}</h3>
+                                <div style={{ fontSize: "13px", color: colors.faint, marginBottom: "8px", fontWeight: 700, letterSpacing: "0.5px" }}>FINAL DECISION / RECOMMENDED ACTION</div>
+                                <h3 style={{ fontSize: "28px", fontWeight: 800, margin: 0, color: (analysisResults.finalDecision === "PASS" || analysisResults.finalDecision === "APPROVED") ? "#34A853" : ((analysisResults.finalDecision === "REJECT" || analysisResults.finalDecision === "REJECTED") ? "#EA4335" : "#F59E0B") }}>{analysisResults.finalDecision || "PENDING"}</h3>
                                 {analysisResults.requiresReview === "YES" && (
                                     <div style={{ marginTop: "8px", display: "inline-block", background: "#F59E0B", color: "white", padding: "4px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: 700 }}>
                                         HUMAN REVIEW REQUIRED
@@ -872,7 +1114,7 @@ export default function Dashboard({ colors, theme, toggleTheme, onSignOut, isEmp
                                 )}
                             </div>
                             <div style={{ maxWidth: "50%", textAlign: "right" }}>
-                                <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.8)", margin: 0, lineHeight: 1.5 }}>
+                                <p style={{ fontSize: "14px", color: colors.bubbleText, margin: 0, lineHeight: 1.5 }}>
                                     {analysisResults.rationale || "Not available"}
                                 </p>
                             </div>
