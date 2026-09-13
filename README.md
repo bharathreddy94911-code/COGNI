@@ -198,6 +198,56 @@ npm run dev
 
 ---
 
+## ☁️ AWS Cloud & Production Deployment
+
+The project is containerized and pre-configured for AWS production deployment using **AWS App Runner** or **AWS ECS Fargate**, **Amazon S3** encrypted document storage, and **Amazon CloudFront** CDN.
+
+### 1. Production Docker Compose (Local & Staging)
+
+Run both backend (with Tesseract OCR) and frontend (with Nginx) with one command:
+```bash
+docker-compose up --build
+```
+* Backend available at: `http://localhost:8000`
+* Frontend available at: `http://localhost:5173`
+* Health check: `curl http://localhost:8000/health`
+
+### 2. AWS App Runner Deployment (Zero-Ops Backend)
+
+```bash
+# Authenticate to ECR and push image
+aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com
+docker build -t loan-document-agent-backend:latest ./backend-code
+docker tag loan-document-agent-backend:latest <ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/loan-document-agent-backend:latest
+docker push <ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/loan-document-agent-backend:latest
+```
+Configure your App Runner service with:
+* **Port**: `8000`
+* **Health Check URL**: `/health`
+* **Environment Variables**: `AWS_S3_BUCKET=<bucket>`, `CORS_ORIGINS=https://<frontend-domain>`, `PORT=8000`
+
+### 3. Amazon S3 Document Storage Setup
+
+```bash
+# Create private document bucket with encryption
+aws s3api create-bucket --bucket <MY_LOAN_DOCUMENTS_BUCKET> --region ap-south-1 --create-bucket-configuration LocationConstraint=ap-south-1
+aws s3api put-public-access-block --bucket <MY_LOAN_DOCUMENTS_BUCKET> --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+aws s3api put-bucket-cors --bucket <MY_LOAN_DOCUMENTS_BUCKET> --cors-configuration file://aws/s3-cors.json
+```
+
+### 4. Frontend Deployment (Amazon S3 + CloudFront)
+
+```bash
+cd "hackathon UI"
+VITE_API_URL="https://your-backend-apprunner-url.awsapprunner.com" npm run build
+aws s3 sync dist/ s3://<MY_FRONTEND_BUCKET> --delete
+```
+* Point an **Amazon CloudFront** distribution to the S3 bucket with SPA custom error response (`404` $\rightarrow$ `/index.html` `200 OK`).
+
+For complete detailed AWS configurations, task definitions, and IAM roles, see **[aws/README.md](file:///c:/Users/Bharath94911/OneDrive/Desktop/COGNIZANT%20FINAL%202/aws/README.md)**.
+
+---
+
 ## 🧪 Testing
 
 Automated test suites verify classifier precision, canonical isolation, and live API endpoints:

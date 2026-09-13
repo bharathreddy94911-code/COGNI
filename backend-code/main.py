@@ -11,7 +11,7 @@ import time
 import uuid
 import hashlib
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends
@@ -71,21 +71,30 @@ from shared.policy import (
     normalize_document_type
 )
 from shared.state import LOAN_TYPE_EXPECTED_DOCUMENTS
+from shared.storage import StorageService
 
 app = FastAPI(
     title="Loan Document Processing AI System",
-    description="SQLite-Backed Loan-Type-Driven Multi-Agent Processing AI",
+    description="Multi-Agent Loan Processing AI with AWS Cloud Integration",
     version="3.5.0"
 )
 
+# Configure CORS: support custom environment domains + standard local dev ports
+raw_cors = os.getenv("CORS_ORIGINS", "")
+default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+env_origins = [o.strip() for o in raw_cors.split(",") if o.strip()]
+cors_origins = list(set(default_origins + env_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174"
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -97,8 +106,19 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 
 
-@app.get("/api")
 @app.get("/health")
+async def health_check():
+    """AWS health check endpoint returning 200 OK with healthy status."""
+    return JSONResponse(content={
+        "status": "healthy",
+        "service": "loan-document-processing-agent",
+        "version": "3.5.0",
+        "s3_enabled": StorageService.is_s3_enabled(),
+        "environment": os.getenv("APP_ENV", "production")
+    })
+
+
+@app.get("/api")
 @app.get("/")
 async def serve_api_root():
     """Returns API health status."""
@@ -665,7 +685,7 @@ async def get_application_report_endpoint(
 # DOCUMENT VIEW & DOWNLOAD (WITH PATH TRAVERSAL PROTECTION)
 # =============================================================================
 
-def _get_safe_document(application_id: str, document_id: int, db: Session) -> DocumentModel:
+def _get_safe_document(application_id: str, document_id: int, db: Session) -> Tuple[DocumentModel, str]:
     doc = repos.get_document_by_id(db, document_id)
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document ID {document_id} not found.")
@@ -676,26 +696,28 @@ def _get_safe_document(application_id: str, document_id: int, db: Session) -> Do
             detail=f"Access denied: Document ID {document_id} does not belong to application '{application_id}'."
         )
     
-    # Path traversal protection
-    target_path = Path(doc.file_path).resolve()
-    allowed_base = UPLOAD_DIR.resolve()
+    # Resolve local path (from cache or downloaded from S3)
+    local_file_path = StorageService.get_local_file_path(doc.file_path)
+    target_path = Path(local_file_path).resolve()
     
-    if not str(target_path).startswith(str(allowed_base)):
-        raise HTTPException(status_code=403, detail="Security Warning: Path traversal detected and blocked.")
+    if not doc.file_path.startswith("s3://"):
+        allowed_base = UPLOAD_DIR.resolve()
+        if not str(target_path).startswith(str(allowed_base)):
+            raise HTTPException(status_code=403, detail="Security Warning: Path traversal detected and blocked.")
     
     if not target_path.exists():
         raise HTTPException(status_code=404, detail="File binary not found on storage disk.")
     
-    return doc
+    return doc, str(target_path)
 
 
 @app.get("/applications/{application_id}/documents/{document_id}/download")
 @app.get("/api/applications/{application_id}/documents/{document_id}/download")
 async def download_document(application_id: str, document_id: int, db: Session = Depends(get_db)):
     """Safe document download endpoint with application ownership check."""
-    doc = _get_safe_document(application_id, document_id, db)
+    doc, file_path = _get_safe_document(application_id, document_id, db)
     return FileResponse(
-        path=doc.file_path,
+        path=file_path,
         filename=doc.file_name,
         media_type=doc.mime_type or "application/octet-stream"
     )
@@ -705,9 +727,9 @@ async def download_document(application_id: str, document_id: int, db: Session =
 @app.get("/api/applications/{application_id}/documents/{document_id}/view")
 async def view_document(application_id: str, document_id: int, db: Session = Depends(get_db)):
     """Safe document view endpoint in browser."""
-    doc = _get_safe_document(application_id, document_id, db)
+    doc, file_path = _get_safe_document(application_id, document_id, db)
     return FileResponse(
-        path=doc.file_path,
+        path=file_path,
         media_type=doc.mime_type or "application/octet-stream"
     )
 
@@ -765,13 +787,10 @@ async def upload_slot_document(
     safe_name = sanitize_filename(file.filename)
     timestamp_str = int(time.time() * 1000)
 
-    # Save to uploads/{application_id}/{requirement_id}/
-    target_dir = UPLOAD_DIR / application_id / requirement_id
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"{timestamp_str}_{safe_name}"
-
-    with open(target_path, "wb") as buffer:
-        buffer.write(file_bytes)
+    # Persist via StorageService (Amazon S3 or local filesystem)
+    storage_key = f"{application_id}/{requirement_id}/{timestamp_str}_{safe_name}"
+    stored_path, storage_type = StorageService.upload_file(file_bytes, storage_key, content_type=file.content_type)
+    target_path = Path(StorageService.get_local_file_path(stored_path))
 
     ext = safe_name.rsplit('.', 1)[-1] if '.' in safe_name else ""
 
@@ -781,7 +800,7 @@ async def upload_slot_document(
         application_id=application_id,
         requirement_id=requirement_id,
         file_name=safe_name,
-        file_path=str(target_path),
+        file_path=stored_path,
         file_extension=ext,
         mime_type=file.content_type,
         upload_status="accepted"
@@ -910,6 +929,7 @@ async def remove_slot_document(
     docs = repos.get_documents(db, application_id, active_only=True)
     target_docs = [d for d in docs if d.requirement_id == requirement_id]
     for target_doc in target_docs:
+        StorageService.delete_file(target_doc.file_path)
         repos.delete_document(db, target_doc.id)
 
     status_obj = _build_application_status_db(application_id, db)
@@ -1755,4 +1775,6 @@ async def get_agent6_metrics():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)

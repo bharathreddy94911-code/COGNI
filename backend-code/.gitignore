@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .env
 .env.*
+!.env.example
 uploads/
 data/*.db
 scratch/test_edu_files/

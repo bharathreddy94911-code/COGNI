@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python Cache & Virtual Environments
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache
+venv
+.venv
+env
+ENV
+
+# Local Database & Uploads
+data/*.db
+data/*.db-journal
+uploads/*
+temp_uploads/*
+scratch/*
+
+# Local Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+
+# IDE & OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Documentation & Tests
+tests/
+alembic/

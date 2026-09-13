@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend API & Multi-Agent Processing Service
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend-code
+      dockerfile: Dockerfile
+    container_name: loan-agent-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/loan_agent.db}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-bank-loan-ai-super-secret-jwt-key-2026-production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - backend-data:/app/data
+      - backend-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Frontend Single-Page Application (Nginx)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./hackathon UI
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    container_name: loan-agent-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  backend-data:
+    driver: local
+  backend-uploads:
+    driver: local

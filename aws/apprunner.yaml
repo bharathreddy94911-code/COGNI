@@ -1,0 +1,28 @@
+version: 1.0
+runtime: python311
+
+build:
+  commands:
+    build:
+      - apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng libgl1 libglib2.0-0 poppler-utils
+      - pip install --no-cache-dir --upgrade pip
+      - pip install --no-cache-dir -r requirements.txt
+
+run:
+  command: uvicorn main:app --host 0.0.0.0 --port 8000
+  network:
+    port: 8000
+    env: PORT
+  env:
+    - name: APP_ENV
+      value: production
+    - name: HOST
+      value: 0.0.0.0
+    - name: PORT
+      value: 8000
+    - name: DATABASE_URL
+      value: sqlite:///data/loan_agent.db
+    - name: CORS_ORIGINS
+      value: "http://localhost:5173,https://your-frontend-domain.com"
+    - name: AWS_REGION
+      value: ap-south-1
